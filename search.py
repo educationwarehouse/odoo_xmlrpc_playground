@@ -28,15 +28,13 @@ Datum: Augustus 2025
 """
 
 import os
-from dotenv import load_dotenv
-from openerp_proxy import Client
-from openerp_proxy.ext.all import *
 import base64
 import csv
 from datetime import datetime, timedelta
+from odoo_base import OdooBase, create_env_file
 
 
-class OdooProjectFileSearchFinal:
+class OdooProjectFileSearchFinal(OdooBase):
     """
     Definitieve werkende versie van de project bestand zoeker
 
@@ -50,41 +48,7 @@ class OdooProjectFileSearchFinal:
         """
         Initialiseer met .env configuratie
         """
-        load_dotenv()
-
-        self.host = os.getenv('ODOO_HOST')
-        self.database = os.getenv('ODOO_DATABASE')
-        self.user = os.getenv('ODOO_USER')
-        self.password = os.getenv('ODOO_PASSWORD')
-
-        if not all([self.host, self.database, self.user, self.password]):
-            raise ValueError("❌ Configuratie incompleet! Controleer je .env bestand.")
-
-        self._connect()
-
-    def _connect(self):
-        """
-        Maak verbinding met Odoo - werkende configuratie
-        """
-        try:
-            print(f"🔌 Verbinden met Odoo...")
-            print(f"   Host: {self.host}")
-            print(f"   Database: {self.database}")
-            print(f"   Gebruiker: {self.user}")
-
-            # Werkende client configuratie
-            self.client = Client(host=self.host, dbname=self.database, user=self.user, pwd=self.password, port=443, protocol='xml-rpcs')
-
-            print(f"✅ Verbonden als: {self.client.user.name} (ID: {self.client.uid})")
-
-            # Model shortcuts
-            self.projects = self.client['project.project']
-            self.tasks = self.client['project.task']
-            self.attachments = self.client['ir.attachment']
-
-        except Exception as e:
-            print(f"❌ Verbinding gefaald: {e}")
-            raise
+        super().__init__()
 
     def _build_working_domain(self, project_ids=None, task_ids=None):
         """
@@ -331,7 +295,7 @@ class OdooProjectFileSearchFinal:
         for bestand in bestanden:
             try:
                 verrijkt = {'id': bestand.id, 'naam': bestand.name, 'type_mime': bestand.mimetype or 'Onbekend', 'grootte': bestand.file_size or 0,
-                    'grootte_human': self._format_file_size(bestand.file_size or 0),
+                    'grootte_human': self.format_file_size(bestand.file_size or 0),
                     'aangemaakt': str(bestand.create_date) if bestand.create_date else 'Onbekend',
                     'gewijzigd': str(bestand.write_date) if bestand.write_date else 'Onbekend', 'publiek': bestand.public, 'model': bestand.res_model,
                     'record_id': bestand.res_id, }
@@ -478,7 +442,7 @@ class OdooProjectFileSearchFinal:
             else:
                 type_stats[mime_type] = {'count': 1, 'size': grootte}
 
-        print(f"💾 Totale grootte: {self._format_file_size(grootte_totaal)}")
+        print(f"💾 Totale grootte: {self.format_file_size(grootte_totaal)}")
         print(f"\n📈 Top bestandstypes:")
 
         # Sorteer op aantal
@@ -486,7 +450,7 @@ class OdooProjectFileSearchFinal:
 
         for i, (mime_type, stats) in enumerate(sorted_types[:10], 1):
             count = stats['count']
-            size = self._format_file_size(stats['size'])
+            size = self.format_file_size(stats['size'])
             percentage = (count / len(bestanden)) * 100
 
             print(f"   {i:2}. {mime_type:<30} {count:4} bestanden ({percentage:5.1f}%) - {size}")
@@ -541,26 +505,6 @@ class OdooProjectFileSearchFinal:
         return f"{size_bytes:.1f} PB"
 
 
-def create_env_file():
-    """
-    Maak .env bestand met jouw configuratie
-    """
-    env_content = """# Odoo Configuratie (werkende setup)
-ODOO_HOST=education-warehouse.odoo.com
-ODOO_DATABASE=education-warehouse
-ODOO_USER=remco.b@educationwarehouse.nl
-ODOO_PASSWORD=jouw_wachtwoord_hier
-
-# Deze configuratie werkt met xml-rpcs protocol op poort 443
-"""
-
-    if not os.path.exists('.env'):
-        with open('.env', 'w') as f:
-            f.write(env_content)
-        print("✅ .env bestand aangemaakt met jouw configuratie")
-        print("   Pas alleen het wachtwoord aan en run het script opnieuw")
-        return False
-    return True
 
 
 def main():
