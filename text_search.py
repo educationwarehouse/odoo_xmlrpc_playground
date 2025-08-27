@@ -1260,15 +1260,27 @@ class OdooTextSearch(OdooBase):
             # Try to place under task's project
             elif message.get('related_type') == 'project.task' and message.get('res_id'):
                 task_id = message['res_id']
-                # Find which project this task belongs to
-                for project_id, project_data in hierarchy['projects'].items():
-                    for task in project_data['tasks']:
-                        if task['id'] == task_id:
-                            hierarchy['projects'][project_id]['messages'].append(message)
-                            placed = True
-                            break
-                    if placed:
+                # First check if the task is in our found tasks
+                task_project_id = None
+                for task in results.get('tasks', []):
+                    if task['id'] == task_id:
+                        task_project_id = task.get('project_id')
                         break
+                
+                # If we found the task's project, try to place the message there
+                if task_project_id and task_project_id in hierarchy['projects']:
+                    hierarchy['projects'][task_project_id]['messages'].append(message)
+                    placed = True
+                else:
+                    # Fallback: search through all projects' tasks
+                    for project_id, project_data in hierarchy['projects'].items():
+                        for task in project_data['tasks']:
+                            if task['id'] == task_id:
+                                hierarchy['projects'][project_id]['messages'].append(message)
+                                placed = True
+                                break
+                        if placed:
+                            break
             
             if not placed:
                 hierarchy['orphaned_messages'].append(message)
@@ -1316,29 +1328,47 @@ class OdooTextSearch(OdooBase):
             # Print project details
             self._print_project_details(project, indent="   ")
             
-            # Print tasks under this project
+            # Determine what sections we have and their order
+            sections = []
             if project_data['tasks']:
-                print(f"   ├── 📋 TASKS ({len(project_data['tasks'])})")
-                for i, task in enumerate(project_data['tasks']):
-                    is_last_task = i == len(project_data['tasks']) - 1
-                    prefix = "   └──" if is_last_task else "   ├──"
-                    self._print_task_item(task, prefix)
-            
-            # Print messages under this project
+                sections.append(('tasks', f"📋 TASKS ({len(project_data['tasks'])})", project_data['tasks']))
             if project_data['messages']:
-                print(f"   ├── 💬 MESSAGES ({len(project_data['messages'])})")
-                for i, message in enumerate(project_data['messages']):
-                    is_last_msg = i == len(project_data['messages']) - 1
-                    prefix = "   └──" if is_last_msg else "   ├──"
-                    self._print_message_item(message, prefix)
-            
-            # Print files under this project
+                sections.append(('messages', f"💬 MESSAGES ({len(project_data['messages'])})", project_data['messages']))
             if project_data['files']:
-                print(f"   └── 📁 FILES ({len(project_data['files'])})")
-                for i, file in enumerate(project_data['files']):
-                    is_last_file = i == len(project_data['files']) - 1
-                    prefix = "      └──" if is_last_file else "      ├──"
-                    self._print_file_item(file, prefix)
+                sections.append(('files', f"📁 FILES ({len(project_data['files'])})", project_data['files']))
+            
+            # Print sections with proper tree structure
+            for section_idx, (section_type, section_title, section_items) in enumerate(sections):
+                is_last_section = section_idx == len(sections) - 1
+                section_prefix = "   └──" if is_last_section else "   ├──"
+                print(f"{section_prefix} {section_title}")
+                
+                for item_idx, item in enumerate(section_items):
+                    is_last_item = item_idx == len(section_items) - 1
+                    
+                    if is_last_section and is_last_item:
+                        # Last item in last section
+                        item_prefix = "      └──"
+                        item_indent = "         "
+                    elif is_last_item:
+                        # Last item in non-last section
+                        item_prefix = "   │  └──"
+                        item_indent = "   │     "
+                    elif is_last_section:
+                        # Non-last item in last section
+                        item_prefix = "      ├──"
+                        item_indent = "      │  "
+                    else:
+                        # Non-last item in non-last section
+                        item_prefix = "   │  ├──"
+                        item_indent = "   │  │  "
+                    
+                    if section_type == 'tasks':
+                        self._print_task_item(item, item_prefix, item_indent)
+                    elif section_type == 'messages':
+                        self._print_message_item(item, item_prefix, item_indent)
+                    elif section_type == 'files':
+                        self._print_file_item(item, item_prefix, item_indent)
         
         # Print orphaned items
         if hierarchy['orphaned_tasks']:
@@ -1389,14 +1419,13 @@ class OdooTextSearch(OdooBase):
         
         print(f"{indent}📅 {project['write_date']}")
 
-    def _print_task_item(self, task, prefix):
+    def _print_task_item(self, task, prefix, indent):
         """Print a task item in the hierarchy"""
         task_url = self.get_task_url(task['id'])
         task_link = self.create_terminal_link(task_url, task['name'])
         print(f"{prefix} {task_link} (ID: {task['id']})")
         
-        # Show task details with deeper indentation
-        indent = "      "
+        # Show task details with proper indentation
         if self.verbose or (task['user'] and task['user'] != 'Unassigned'):
             print(f"{indent}👤 {task['user']}")
         if self.verbose or (task['priority'] and task['priority'] != '0'):
@@ -1416,14 +1445,13 @@ class OdooTextSearch(OdooBase):
         
         print(f"{indent}📅 {task['write_date']}")
 
-    def _print_message_item(self, message, prefix):
+    def _print_message_item(self, message, prefix, indent):
         """Print a message item in the hierarchy"""
         message_url = self.get_message_url(message['id'])
         message_link = self.create_terminal_link(message_url, message['subject'])
         print(f"{prefix} {message_link} (ID: {message['id']})")
         
-        # Show message details with deeper indentation
-        indent = "      "
+        # Show message details with proper indentation
         if self.verbose or (message['author'] and message['author'] != 'System'):
             print(f"{indent}👤 {message['author']}")
         print(f"{indent}📅 {message['date']}")
@@ -1434,14 +1462,13 @@ class OdooTextSearch(OdooBase):
             body_snippet = body_snippet.replace('\n', ' ').strip()
             print(f"{indent}💬 {body_snippet}")
 
-    def _print_file_item(self, file, prefix):
+    def _print_file_item(self, file, prefix, indent):
         """Print a file item in the hierarchy"""
         file_url = self.get_file_url(file['id'])
         file_link = self.create_terminal_link(file_url, file['name'])
         print(f"{prefix} {file_link} (ID: {file['id']})")
         
-        # Show file details with deeper indentation
-        indent = "         "
+        # Show file details with proper indentation
         if self.verbose or (file['mimetype'] and file['mimetype'] != 'Unknown'):
             print(f"{indent}📊 {file['mimetype']}")
         if self.verbose or file.get('file_size', 0) > 0:
