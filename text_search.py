@@ -254,25 +254,18 @@ class OdooTextSearch(OdooBase):
 
     def search_files(self, search_term, since=None, file_types=None, model_type='both'):
         """
-        Search in file names and metadata for projects and tasks
+        Search in file names and metadata for all attachments
         
         Args:
             search_term: Text to search for in filenames
             since: Datetime to limit search from
             file_types: List of file extensions to filter by (e.g., ['pdf', 'docx'])
-            model_type: 'projects', 'tasks', or 'both'
+            model_type: 'projects', 'tasks', 'both', or 'all' (all includes any model)
         """
         if self.verbose:
             print(f"🔍 Searching files for: '{search_term}'")
         
         try:
-            # Get all project and task IDs first
-            all_projects = self.projects.search_records([])
-            all_tasks = self.tasks.search_records([])
-            
-            project_ids = [p.id for p in all_projects]
-            task_ids = [t.id for t in all_tasks]
-            
             # Build domain for file search
             domain = []
             
@@ -280,18 +273,29 @@ class OdooTextSearch(OdooBase):
             if since:
                 domain.append(('create_date', '>=', since.strftime('%Y-%m-%d %H:%M:%S')))
             
-            # Model filter - files attached to projects/tasks
-            model_conditions = []
-            if model_type in ['projects', 'both'] and project_ids:
-                model_conditions.append(['&', ('res_model', '=', 'project.project'), ('res_id', 'in', project_ids)])
-            if model_type in ['tasks', 'both'] and task_ids:
-                model_conditions.append(['&', ('res_model', '=', 'project.task'), ('res_id', 'in', task_ids)])
-            
-            if len(model_conditions) == 2:
-                model_domain = ['|'] + model_conditions[0] + model_conditions[1]
-            elif len(model_conditions) == 1:
-                model_domain = model_conditions[0]
+            # Model filter - files attached to specific models or all
+            if model_type != 'all':
+                # Get all project and task IDs first
+                all_projects = self.projects.search_records([])
+                all_tasks = self.tasks.search_records([])
+                
+                project_ids = [p.id for p in all_projects]
+                task_ids = [t.id for t in all_tasks]
+                
+                model_conditions = []
+                if model_type in ['projects', 'both'] and project_ids:
+                    model_conditions.append(['&', ('res_model', '=', 'project.project'), ('res_id', 'in', project_ids)])
+                if model_type in ['tasks', 'both'] and task_ids:
+                    model_conditions.append(['&', ('res_model', '=', 'project.task'), ('res_id', 'in', task_ids)])
+                
+                if len(model_conditions) == 2:
+                    model_domain = ['|'] + model_conditions[0] + model_conditions[1]
+                elif len(model_conditions) == 1:
+                    model_domain = model_conditions[0]
+                else:
+                    model_domain = []
             else:
+                # Search all attachments regardless of model
                 model_domain = []
             
             # Text search in filename
@@ -409,7 +413,8 @@ class OdooTextSearch(OdooBase):
             
             # Search files
             if include_files or search_type == 'files':
-                model_type = 'both' if search_type in ['all', 'files'] else search_type
+                # Use 'all' for comprehensive file search when searching all or files specifically
+                model_type = 'all' if search_type in ['all', 'files'] else search_type
                 results['files'] = self.search_files(search_term, since_date, file_types, model_type)
             
             return results
@@ -507,6 +512,15 @@ class OdooTextSearch(OdooBase):
                             'related_id': file.res_id,
                             'error': f'Task info not available: {e}'
                         })
+                
+                else:
+                    # Handle other models (mail.message, res.partner, etc.)
+                    enriched_file.update({
+                        'related_type': file.res_model or 'Unknown',
+                        'related_name': f'{file.res_model} {file.res_id}' if file.res_model and file.res_id else 'No relation',
+                        'related_id': file.res_id,
+                        'model_name': file.res_model or 'Unknown'
+                    })
                 
                 enriched.append(enriched_file)
                 
@@ -1069,7 +1083,7 @@ Download files:
     parser.add_argument('search_term', nargs='?', help='Text to search for (optional when using --download)')
     parser.add_argument('--since', help='Time reference (e.g., "1 week", "3 days", "2 months")')
     parser.add_argument('--type', choices=['all', 'projects', 'tasks', 'logs', 'files'], default='all',
-                       help='What to search in (default: all)')
+                       help='What to search in (default: all). Use "files" to search ALL attachments regardless of model.')
     parser.add_argument('--exclude-logs', action='store_true',
                        help='Exclude search in log messages (logs included by default)')
     parser.add_argument('--include-files', action='store_true',
