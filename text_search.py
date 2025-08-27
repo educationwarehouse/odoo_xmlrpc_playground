@@ -26,6 +26,7 @@ import re
 import csv
 import html
 import base64
+import textwrap
 from odoo_base import OdooBase
 
 
@@ -1430,9 +1431,10 @@ class OdooTextSearch(OdooBase):
         # Show description if there's a match
         if project['match_in_description'] and project['description']:
             markdown_desc = self._html_to_markdown(project['description'])
-            desc_snippet = markdown_desc[:200] + "..." if len(markdown_desc) > 200 else markdown_desc
+            desc_snippet = markdown_desc[:400] + "..." if len(markdown_desc) > 400 else markdown_desc
             desc_snippet = desc_snippet.replace('\n', ' ').strip()
-            print(f"{indent}📝 {desc_snippet}")
+            print(f"{indent}📝 Description:")
+            print(self._format_wrapped_text(desc_snippet, indent + "   "))
         
         print(f"{indent}📅 {project['write_date']}")
 
@@ -1456,9 +1458,10 @@ class OdooTextSearch(OdooBase):
         
         if task['match_in_description'] and task['description']:
             markdown_desc = self._html_to_markdown(task['description'])
-            desc_snippet = markdown_desc[:200] + "..." if len(markdown_desc) > 200 else markdown_desc
+            desc_snippet = markdown_desc[:400] + "..." if len(markdown_desc) > 400 else markdown_desc
             desc_snippet = desc_snippet.replace('\n', ' ').strip()
-            print(f"{indent}📝 {desc_snippet}")
+            print(f"{indent}📝 Description:")
+            print(self._format_wrapped_text(desc_snippet, indent + "   "))
         
         print(f"{indent}📅 {task['write_date']}")
 
@@ -1475,9 +1478,10 @@ class OdooTextSearch(OdooBase):
         
         if message['body']:
             markdown_body = self._html_to_markdown(message['body'])
-            body_snippet = markdown_body[:200] + "..." if len(markdown_body) > 200 else markdown_body
+            body_snippet = markdown_body[:400] + "..." if len(markdown_body) > 400 else markdown_body
             body_snippet = body_snippet.replace('\n', ' ').strip()
-            print(f"{indent}💬 {body_snippet}")
+            print(f"{indent}💬 Message:")
+            print(self._format_wrapped_text(body_snippet, indent + "   "))
 
     def _print_file_item(self, file, prefix, indent):
         """Print a file item in the hierarchy"""
@@ -1518,9 +1522,10 @@ class OdooTextSearch(OdooBase):
         
         if task['match_in_description'] and task['description']:
             markdown_desc = self._html_to_markdown(task['description'])
-            desc_snippet = markdown_desc[:200] + "..." if len(markdown_desc) > 200 else markdown_desc
+            desc_snippet = markdown_desc[:400] + "..." if len(markdown_desc) > 400 else markdown_desc
             desc_snippet = desc_snippet.replace('\n', ' ').strip()
-            print(f"   📝 {desc_snippet}")
+            print(f"   📝 Description:")
+            print(self._format_wrapped_text(desc_snippet, "      "))
         
         print(f"   📅 {task['write_date']}")
 
@@ -1547,9 +1552,10 @@ class OdooTextSearch(OdooBase):
         
         if message['body']:
             markdown_body = self._html_to_markdown(message['body'])
-            body_snippet = markdown_body[:200] + "..." if len(markdown_body) > 200 else markdown_body
+            body_snippet = markdown_body[:400] + "..." if len(markdown_body) > 400 else markdown_body
             body_snippet = body_snippet.replace('\n', ' ').strip()
-            print(f"   💬 {body_snippet}")
+            print(f"   💬 Message:")
+            print(self._format_wrapped_text(body_snippet, "      "))
 
     def _print_file_standalone(self, file, index):
         """Print a standalone file"""
@@ -1669,6 +1675,37 @@ class OdooTextSearch(OdooBase):
         text = text.strip()
         
         return text
+
+    def _format_wrapped_text(self, text, indent, width=80, prefix="│ "):
+        """
+        Format text with proper wrapping and indentation with a vertical line indicator
+        
+        Args:
+            text: Text to format
+            indent: Base indentation string
+            width: Maximum line width
+            prefix: Prefix for each line (vertical line indicator)
+            
+        Returns:
+            Formatted text with proper wrapping and indentation
+        """
+        if not text:
+            return ""
+        
+        # Calculate available width for text (subtract indent and prefix)
+        available_width = width - len(indent) - len(prefix)
+        if available_width < 20:  # Minimum reasonable width
+            available_width = 40
+        
+        # Wrap the text
+        wrapped_lines = textwrap.wrap(text, width=available_width)
+        
+        # Format each line with indent and prefix
+        formatted_lines = []
+        for line in wrapped_lines:
+            formatted_lines.append(f"{indent}{prefix}{line}")
+        
+        return "\n".join(formatted_lines)
 
     def download_file(self, file_id, output_path):
         """
