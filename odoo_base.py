@@ -28,9 +28,11 @@ class OdooBase:
     - File size formatting
     """
 
-    def __init__(self):
+    def __init__(self, verbose=False):
         """Initialize with .env configuration"""
         load_dotenv()
+        
+        self.verbose = verbose
 
         self.host = os.getenv('ODOO_HOST')
         self.database = os.getenv('ODOO_DATABASE')
@@ -48,10 +50,11 @@ class OdooBase:
     def _connect(self):
         """Connect to Odoo"""
         try:
-            print(f"🔌 Connecting to Odoo...")
-            print(f"   Host: {self.host}")
-            print(f"   Database: {self.database}")
-            print(f"   User: {self.user}")
+            if self.verbose:
+                print(f"🔌 Connecting to Odoo...")
+                print(f"   Host: {self.host}")
+                print(f"   Database: {self.database}")
+                print(f"   User: {self.user}")
 
             self.client = Client(
                 host=self.host, 
@@ -62,7 +65,8 @@ class OdooBase:
                 protocol='xml-rpcs'
             )
 
-            print(f"✅ Connected as: {self.client.user.name} (ID: {self.client.uid})")
+            if self.verbose:
+                print(f"✅ Connected as: {self.client.user.name} (ID: {self.client.uid})")
 
             # Model shortcuts
             self.projects = self.client['project.project']

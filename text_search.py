@@ -39,9 +39,9 @@ class OdooTextSearch(OdooBase):
     - Efficient querying to avoid server overload
     """
 
-    def __init__(self):
+    def __init__(self, verbose=False):
         """Initialize with .env configuration"""
-        super().__init__()
+        super().__init__(verbose=verbose)
 
     def _parse_time_reference(self, time_ref):
         """
@@ -88,7 +88,8 @@ class OdooTextSearch(OdooBase):
             since: Datetime to limit search from
             include_descriptions: Whether to search in descriptions
         """
-        print(f"🔍 Searching projects for: '{search_term}'")
+        if self.verbose:
+            print(f"🔍 Searching projects for: '{search_term}'")
         
         try:
             # Build domain for project search
@@ -113,10 +114,13 @@ class OdooTextSearch(OdooBase):
             else:
                 final_domain = text_domain
             
-            print(f"🔧 Project domain: {final_domain}")
+            if self.verbose:
+                print(f"🔧 Project domain: {final_domain}")
             
             projects = self.projects.search_records(final_domain)
-            print(f"📂 Found {len(projects)} matching projects")
+            
+            if self.verbose:
+                print(f"📂 Found {len(projects)} matching projects")
             
             return self._enrich_projects(projects, search_term)
             
@@ -134,7 +138,8 @@ class OdooTextSearch(OdooBase):
             include_descriptions: Whether to search in descriptions
             project_ids: Limit to specific projects
         """
-        print(f"🔍 Searching tasks for: '{search_term}'")
+        if self.verbose:
+            print(f"🔍 Searching tasks for: '{search_term}'")
         
         try:
             # Build domain for task search
@@ -168,10 +173,13 @@ class OdooTextSearch(OdooBase):
             else:
                 final_domain = text_domain
             
-            print(f"🔧 Task domain: {final_domain}")
+            if self.verbose:
+                print(f"🔧 Task domain: {final_domain}")
             
             tasks = self.tasks.search_records(final_domain)
-            print(f"📋 Found {len(tasks)} matching tasks")
+            
+            if self.verbose:
+                print(f"📋 Found {len(tasks)} matching tasks")
             
             return self._enrich_tasks(tasks, search_term)
             
@@ -188,7 +196,8 @@ class OdooTextSearch(OdooBase):
             since: Datetime to limit search from
             model_type: 'projects', 'tasks', or 'both'
         """
-        print(f"🔍 Searching messages for: '{search_term}'")
+        if self.verbose:
+            print(f"🔍 Searching messages for: '{search_term}'")
         
         try:
             # Build domain for message search
@@ -223,10 +232,13 @@ class OdooTextSearch(OdooBase):
             else:
                 final_domain = text_domain
             
-            print(f"🔧 Message domain: {final_domain}")
+            if self.verbose:
+                print(f"🔧 Message domain: {final_domain}")
             
             messages = self.messages.search_records(final_domain)
-            print(f"💬 Found {len(messages)} matching messages")
+            
+            if self.verbose:
+                print(f"💬 Found {len(messages)} matching messages")
             
             return self._enrich_messages(messages, search_term)
             
@@ -245,20 +257,26 @@ class OdooTextSearch(OdooBase):
             include_descriptions: Search in descriptions
             include_logs: Search in log messages (default: True)
         """
-        print(f"\n🚀 FULL TEXT SEARCH")
-        print(f"=" * 60)
-        print(f"🔍 Search term: '{search_term}'")
-        
-        # Parse time reference
-        since_date = None
-        if since:
-            since_date = self._parse_time_reference(since)
-            print(f"📅 Since: {since} ({since_date.strftime('%Y-%m-%d %H:%M:%S') if since_date else 'Invalid'})")
-        
-        print(f"🎯 Type: {search_type}")
-        print(f"📝 Include descriptions: {include_descriptions}")
-        print(f"💬 Include logs: {include_logs}")
-        print()
+        if self.verbose:
+            print(f"\n🚀 FULL TEXT SEARCH")
+            print(f"=" * 60)
+            print(f"🔍 Search term: '{search_term}'")
+            
+            # Parse time reference
+            since_date = None
+            if since:
+                since_date = self._parse_time_reference(since)
+                print(f"📅 Since: {since} ({since_date.strftime('%Y-%m-%d %H:%M:%S') if since_date else 'Invalid'})")
+            
+            print(f"🎯 Type: {search_type}")
+            print(f"📝 Include descriptions: {include_descriptions}")
+            print(f"💬 Include logs: {include_logs}")
+            print()
+        else:
+            # Parse time reference
+            since_date = None
+            if since:
+                since_date = self._parse_time_reference(since)
         
         results = {
             'projects': [],
@@ -271,7 +289,8 @@ class OdooTextSearch(OdooBase):
             if search_type in ['all', 'projects']:
                 results['projects'] = self.search_projects(search_term, since_date, include_descriptions)
             
-            print()  # Add white line between searches
+            if self.verbose:
+                print()  # Add white line between searches
             
             # Search tasks
             if search_type in ['all', 'tasks']:
@@ -663,15 +682,20 @@ Examples:
                        help='Do not search in descriptions, only names/subjects')
     parser.add_argument('--limit', type=int, help='Limit number of results to display')
     parser.add_argument('--export', help='Export results to CSV file')
+    parser.add_argument('--verbose', '-v', action='store_true',
+                       help='Show detailed search information and debug output')
     
     args = parser.parse_args()
     
-    print("🚀 Odoo Project Text Search")
-    print("=" * 50)
+    if not args.verbose:
+        print("🔍 Searching...")
+    else:
+        print("🚀 Odoo Project Text Search")
+        print("=" * 50)
     
     try:
         # Initialize searcher
-        searcher = OdooTextSearch()
+        searcher = OdooTextSearch(verbose=args.verbose)
         
         # Perform search
         results = searcher.full_text_search(

@@ -44,11 +44,11 @@ class OdooProjectFileSearchFinal(OdooBase):
     - Geen geneste lijst problemen
     """
 
-    def __init__(self):
+    def __init__(self, verbose=False):
         """
         Initialiseer met .env configuratie
         """
-        super().__init__()
+        super().__init__(verbose=verbose)
 
     def _build_working_domain(self, project_ids=None, task_ids=None):
         """
