@@ -626,7 +626,13 @@ class OdooTextSearch(OdooBase):
                                                 import re
                                                 id_match = re.search(r'\[(\d+)\]', partial_str)
                                                 if id_match:
-                                                    user_id = int(id_match.group(1))
+                                                    extracted_id = int(id_match.group(1))
+                                                    # Check if extracted ID is the same as task ID (indicates wrong field)
+                                                    if extracted_id == task.id:
+                                                        if self.verbose:
+                                                            print(f"⚠️ Extracted ID {extracted_id} matches task ID, skipping user field {field_name}")
+                                                        continue
+                                                    user_id = extracted_id
                                                     if self.verbose:
                                                         print(f"🔍 Extracted user ID {user_id} from partial object for file {file.id}")
                                                     break
@@ -726,7 +732,13 @@ class OdooTextSearch(OdooBase):
                                     import re
                                     id_match = re.search(r'\[(\d+)\]', partial_str)
                                     if id_match:
-                                        user_id = int(id_match.group(1))
+                                        extracted_id = int(id_match.group(1))
+                                        # Check if extracted ID is the same as task ID (indicates wrong field)
+                                        if extracted_id == task.id:
+                                            if self.verbose:
+                                                print(f"⚠️ Extracted ID {extracted_id} matches task ID, skipping user field {field_name}")
+                                            continue
+                                        user_id = extracted_id
                                         if self.verbose:
                                             print(f"🔍 Extracted user ID {user_id} from partial object for task {task.id}")
                                         break
