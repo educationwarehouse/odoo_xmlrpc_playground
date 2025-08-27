@@ -46,6 +46,9 @@ class OdooTextSearch(OdooBase):
         
         # Add attachments model for file search
         self.attachments = self.client['ir.attachment']
+        
+        # User lookup cache
+        self.user_cache = {}
 
     def _parse_time_reference(self, time_ref):
         """
@@ -366,6 +369,46 @@ class OdooTextSearch(OdooBase):
             print(f"❌ Error searching files: {e}")
             return []
 
+    def _build_user_cache(self):
+        """Build a cache of all users for efficient lookup"""
+        if self.verbose:
+            print("👥 Building user cache...")
+        
+        try:
+            # Get all users
+            users = self.client['res.users'].search_records([])
+            self.user_cache = {user.id: user.name for user in users}
+            
+            if self.verbose:
+                print(f"👥 Cached {len(self.user_cache)} users")
+                
+        except Exception as e:
+            if self.verbose:
+                print(f"⚠️ Could not build user cache: {e}")
+            self.user_cache = {}
+
+    def _get_user_name(self, user_id):
+        """Get user name from cache, with fallback"""
+        if not user_id:
+            return 'Unassigned'
+        
+        if user_id in self.user_cache:
+            return self.user_cache[user_id]
+        
+        # Fallback: try to get user directly
+        try:
+            user_records = self.client['res.users'].search_records([('id', '=', user_id)])
+            if user_records:
+                user_name = user_records[0].name
+                # Cache for future use
+                self.user_cache[user_id] = user_name
+                return user_name
+        except Exception as e:
+            if self.verbose:
+                print(f"⚠️ Could not get user {user_id}: {e}")
+        
+        return f'User {user_id} (not found)'
+
     def full_text_search(self, search_term, since=None, search_type='all', include_descriptions=True, include_logs=True, include_files=True, file_types=None):
         """
         Comprehensive text search across projects, tasks, logs, and files
@@ -402,6 +445,9 @@ class OdooTextSearch(OdooBase):
             since_date = None
             if since:
                 since_date = self._parse_time_reference(since)
+        
+        # Build user cache for efficient lookups
+        self._build_user_cache()
         
         results = {
             'projects': [],
@@ -558,35 +604,28 @@ class OdooTextSearch(OdooBase):
                                 except:
                                     project_name = 'Project (unavailable)'
                             
-                            # Handle user relationship safely - use read method for better field access
+                            # Handle user relationship safely - try different field names
                             assigned_user = 'Unassigned'
-                            try:
-                                # Use read method to get user_id field value directly
-                                task_data = self.tasks.read(task.id, ['user_id'])
-                                if task_data and 'user_id' in task_data:
-                                    user_id_data = task_data['user_id']
-                                    if user_id_data:
-                                        # user_id_data is typically [id, name] tuple or just id
-                                        if isinstance(user_id_data, (list, tuple)) and len(user_id_data) >= 2:
-                                            assigned_user = user_id_data[1]  # name is second element
-                                        elif isinstance(user_id_data, int):
-                                            # Just an ID, look up the user
-                                            if self.verbose:
-                                                print(f"🔍 Looking up user ID {user_id_data} for file {file.id}")
-                                            user_records = self.client['res.users'].search_records([('id', '=', user_id_data)])
-                                            if user_records:
-                                                assigned_user = user_records[0].name
-                                            else:
-                                                assigned_user = f'User {user_id_data} (not found)'
-                                        else:
-                                            assigned_user = 'User (unknown format)'
-                                    # else: user_id is False/None, keep 'Unassigned'
-                                else:
-                                    assigned_user = 'User (field not readable)'
-                            except Exception as e:
-                                if self.verbose:
-                                    print(f"⚠️ Could not get user info for file {file.id}: {e}")
-                                assigned_user = 'User (read error)'
+                            user_id = None
+                            
+                            # Try common user field names
+                            for field_name in ['user_id', 'user_ids', 'assigned_user_id', 'responsible_user_id']:
+                                try:
+                                    if hasattr(task, field_name):
+                                        user_field = getattr(task, field_name, None)
+                                        if user_field:
+                                            if hasattr(user_field, 'id'):
+                                                user_id = user_field.id
+                                                break
+                                            elif isinstance(user_field, int):
+                                                user_id = user_field
+                                                break
+                                except:
+                                    continue
+                            
+                            # Use cached user lookup
+                            if user_id:
+                                assigned_user = self._get_user_name(user_id)
                             
                             enriched_file.update({
                                 'related_type': 'Task',
@@ -655,35 +694,28 @@ class OdooTextSearch(OdooBase):
                     except:
                         project_name = 'Project (unavailable)'
                 
-                # Handle user relationship - use read method for better field access
+                # Handle user relationship - try different field names
                 user_name = 'Unassigned'
-                try:
-                    # Use read method to get user_id field value directly
-                    task_data = self.tasks.read(task.id, ['user_id'])
-                    if task_data and 'user_id' in task_data:
-                        user_id_data = task_data['user_id']
-                        if user_id_data:
-                            # user_id_data is typically [id, name] tuple or just id
-                            if isinstance(user_id_data, (list, tuple)) and len(user_id_data) >= 2:
-                                user_name = user_id_data[1]  # name is second element
-                            elif isinstance(user_id_data, int):
-                                # Just an ID, look up the user
-                                if self.verbose:
-                                    print(f"🔍 Looking up user ID {user_id_data} for task {task.id}")
-                                user_records = self.client['res.users'].search_records([('id', '=', user_id_data)])
-                                if user_records:
-                                    user_name = user_records[0].name
-                                else:
-                                    user_name = f'User {user_id_data} (not found)'
-                            else:
-                                user_name = 'User (unknown format)'
-                        # else: user_id is False/None, keep 'Unassigned'
-                    else:
-                        user_name = 'User (field not readable)'
-                except Exception as e:
-                    if self.verbose:
-                        print(f"⚠️ Could not get user info for task {task.id}: {e}")
-                    user_name = 'User (read error)'
+                user_id = None
+                
+                # Try common user field names
+                for field_name in ['user_id', 'user_ids', 'assigned_user_id', 'responsible_user_id']:
+                    try:
+                        if hasattr(task, field_name):
+                            user_field = getattr(task, field_name, None)
+                            if user_field:
+                                if hasattr(user_field, 'id'):
+                                    user_id = user_field.id
+                                    break
+                                elif isinstance(user_field, int):
+                                    user_id = user_field
+                                    break
+                    except:
+                        continue
+                
+                # Use cached user lookup
+                if user_id:
+                    user_name = self._get_user_name(user_id)
                 
                 enriched_task = {
                     'id': task.id,
