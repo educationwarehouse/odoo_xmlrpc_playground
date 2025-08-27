@@ -53,6 +53,9 @@ class OdooTextSearch:
         if not all([self.host, self.database, self.user, self.password]):
             raise ValueError("❌ Configuration incomplete! Check your .env file.")
 
+        # Build base URL for links
+        self.base_url = f"https://{self.host}"
+
         self._connect()
 
     def _connect(self):
@@ -499,7 +502,9 @@ class OdooTextSearch:
             print(f"\n📂 PROJECTS ({len(results['projects'])})")
             print("-" * 40)
             for i, project in enumerate(results['projects'][:limit] if limit else results['projects'], 1):
-                print(f"\n{i}. 📂 {project['name']} (ID: {project['id']})")
+                project_url = self._get_project_url(project['id'])
+                project_link = self._create_terminal_link(project_url, project['name'])
+                print(f"\n{i}. 📂 {project_link} (ID: {project['id']})")
                 print(f"   🏢 Client: {project['partner']}")
                 print(f"   👤 Manager: {project['user']}")
                 if project['match_in_name']:
@@ -519,7 +524,9 @@ class OdooTextSearch:
             print(f"\n📋 TASKS ({len(results['tasks'])})")
             print("-" * 40)
             for i, task in enumerate(results['tasks'][:limit] if limit else results['tasks'], 1):
-                print(f"\n{i}. 📋 {task['name']} (ID: {task['id']})")
+                task_url = self._get_task_url(task['id'])
+                task_link = self._create_terminal_link(task_url, task['name'])
+                print(f"\n{i}. 📋 {task_link} (ID: {task['id']})")
                 print(f"   📂 Project: {task['project_name']}")
                 print(f"   👤 Assigned: {task['user']}")
                 print(f"   🔥 Priority: {task['priority']}")
@@ -541,7 +548,17 @@ class OdooTextSearch:
             print("-" * 40)
             for i, message in enumerate(results['messages'][:limit] if limit else results['messages'], 1):
                 print(f"\n{i}. 💬 {message['subject']} (ID: {message['id']})")
-                print(f"   📎 Related: {message['related_name']} ({message['related_type']})")
+                
+                # Create link for related record
+                related_link = message['related_name']
+                if message['related_type'] == 'project.project' and message['res_id']:
+                    related_url = self._get_project_url(message['res_id'])
+                    related_link = self._create_terminal_link(related_url, message['related_name'])
+                elif message['related_type'] == 'project.task' and message['res_id']:
+                    related_url = self._get_task_url(message['res_id'])
+                    related_link = self._create_terminal_link(related_url, message['related_name'])
+                
+                print(f"   📎 Related: {related_link} ({message['related_type']})")
                 print(f"   👤 Author: {message['author']}")
                 print(f"   📅 Date: {message['date']}")
                 # Show snippet of body
@@ -625,6 +642,28 @@ class OdooTextSearch:
         text = text.strip()
         
         return text
+
+    def _create_terminal_link(self, url, text):
+        """
+        Create a clickable terminal hyperlink using ANSI escape sequences
+        
+        Args:
+            url: The URL to link to
+            text: The display text
+            
+        Returns:
+            Formatted string with terminal hyperlink
+        """
+        # ANSI escape sequence for hyperlinks: \033]8;;URL\033\\TEXT\033]8;;\033\\
+        return f"\033]8;;{url}\033\\{text}\033]8;;\033\\"
+
+    def _get_project_url(self, project_id):
+        """Get the URL for a project"""
+        return f"{self.base_url}/odoo/all-projects/{project_id}"
+
+    def _get_task_url(self, task_id):
+        """Get the URL for a task"""
+        return f"{self.base_url}/odoo/all-tasks/{task_id}"
 
     def export_results(self, results, filename='text_search_results.csv'):
         """Export search results to CSV"""
