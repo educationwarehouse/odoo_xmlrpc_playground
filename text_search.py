@@ -100,7 +100,7 @@ class OdooTextSearch(OdooBase):
 
     def search_projects(self, search_term, since=None, include_descriptions=True):
         """
-        Search in project names and descriptions using cached data
+        Search in project names and descriptions using direct database queries
         
         Args:
             search_term: Text to search for
@@ -113,52 +113,75 @@ class OdooTextSearch(OdooBase):
             print(f"🔍 Searching projects...", end="", flush=True)
         
         try:
-            # Ensure project cache is built
-            if not self._project_cache_built:
-                self._build_project_cache()
+            # Build domain for project search
+            domain = []
             
-            # Search in cached projects
-            matching_projects = []
-            search_lower = search_term.lower()
+            # Time filter
+            if since:
+                domain.append(('write_date', '>=', since.strftime('%Y-%m-%d %H:%M:%S')))
             
-            for project_id, project_data in self.project_cache.items():
-                # Time filter
-                if since:
-                    try:
-                        write_date = datetime.fromisoformat(project_data['write_date'].replace('Z', '+00:00')) if project_data['write_date'] else None
-                        if not write_date or write_date < since:
-                            continue
-                    except:
-                        continue
-                
-                # Text search
-                name_match = search_lower in project_data['name'].lower()
-                desc_match = include_descriptions and search_lower in project_data['description'].lower()
-                
-                if name_match or desc_match:
-                    # Create enriched project data directly from cache
-                    enriched_project = {
-                        'id': project_data['id'],
-                        'name': project_data['name'],
-                        'description': project_data['description'],
-                        'partner': project_data['partner_name'],
-                        'stage': project_data['stage_id'],
-                        'user': project_data['user_name'],
-                        'create_date': project_data['create_date'],
-                        'write_date': project_data['write_date'],
-                        'type': 'project',
-                        'search_term': search_term,
-                        'match_in_name': name_match,
-                        'match_in_description': desc_match
-                    }
-                    matching_projects.append(enriched_project)
+            # Text search in name
+            name_domain = [('name', 'ilike', search_term)]
+            
+            if include_descriptions:
+                # Search in both name and description
+                text_domain = ['|', ('name', 'ilike', search_term), ('description', 'ilike', search_term)]
+            else:
+                text_domain = name_domain
+            
+            # Combine domains
+            if domain:
+                final_domain = ['&'] + domain + text_domain
+            else:
+                final_domain = text_domain
             
             if self.verbose:
-                print(f"📂 Found {len(matching_projects)} matching projects")
-            else:
-                print(f" {len(matching_projects)} found", flush=True)
+                print(f"🔧 Project domain: {final_domain}")
             
-            return matching_projects
+            projects = self.projects.search_records(final_domain)
+            
+            if self.verbose:
+                print(f"📂 Found {len(projects)} matching projects")
+            else:
+                print(f" {len(projects)} found", flush=True)
+            
+            # Cache found projects for future use
+            enriched_projects = []
+            for project in projects:
+                project_data = {
+                    'id': project.id,
+                    'name': project.name,
+                    'description': getattr(project, 'description', '') or '',
+                    'partner_id': project.partner_id.id if project.partner_id else None,
+                    'partner_name': project.partner_id.name if project.partner_id else 'No client',
+                    'user_id': project.user_id.id if project.user_id else None,
+                    'user_name': project.user_id.name if project.user_id else 'Unassigned',
+                    'create_date': str(project.create_date) if project.create_date else '',
+                    'write_date': str(project.write_date) if project.write_date else '',
+                    'stage_id': getattr(project, 'stage_id', None)
+                }
+                
+                # Cache this project for future lookups
+                self.project_cache[project.id] = project_data
+                
+                # Create enriched result
+                enriched_project = {
+                    'id': project_data['id'],
+                    'name': project_data['name'],
+                    'description': project_data['description'],
+                    'partner': project_data['partner_name'],
+                    'stage': project_data['stage_id'],
+                    'user': project_data['user_name'],
+                    'create_date': project_data['create_date'],
+                    'write_date': project_data['write_date'],
+                    'type': 'project',
+                    'search_term': search_term,
+                    'match_in_name': search_term.lower() in project_data['name'].lower(),
+                    'match_in_description': search_term.lower() in project_data['description'].lower()
+                }
+                enriched_projects.append(enriched_project)
+            
+            return enriched_projects
             
         except Exception as e:
             print(f"❌ Error searching projects: {e}")
@@ -166,7 +189,7 @@ class OdooTextSearch(OdooBase):
 
     def search_tasks(self, search_term, since=None, include_descriptions=True, project_ids=None):
         """
-        Search in task names and descriptions using cached data
+        Search in task names and descriptions using direct database queries
         
         Args:
             search_term: Text to search for
@@ -180,58 +203,110 @@ class OdooTextSearch(OdooBase):
             print(f"🔍 Searching tasks...", end="", flush=True)
         
         try:
-            # Ensure task cache is built
-            if not self._task_cache_built:
-                self._build_task_cache()
+            # Build domain for task search
+            domain = []
             
-            # Search in cached tasks
-            matching_tasks = []
-            search_lower = search_term.lower()
+            # Time filter
+            if since:
+                domain.append(('write_date', '>=', since.strftime('%Y-%m-%d %H:%M:%S')))
             
-            for task_id, task_data in self.task_cache.items():
-                # Project filter
-                if project_ids and task_data['project_id'] not in project_ids:
-                    continue
-                
-                # Time filter
-                if since:
-                    try:
-                        write_date = datetime.fromisoformat(task_data['write_date'].replace('Z', '+00:00')) if task_data['write_date'] else None
-                        if not write_date or write_date < since:
-                            continue
-                    except:
-                        continue
-                
-                # Text search
-                name_match = search_lower in task_data['name'].lower()
-                desc_match = include_descriptions and search_lower in task_data['description'].lower()
-                
-                if name_match or desc_match:
-                    # Create enriched task data directly from cache
-                    enriched_task = {
-                        'id': task_data['id'],
-                        'name': task_data['name'],
-                        'description': task_data['description'],
-                        'project_name': task_data['project_name'],
-                        'project_id': task_data['project_id'],
-                        'stage': task_data['stage_id'],
-                        'user': task_data['user_name'],
-                        'priority': task_data['priority'],
-                        'create_date': task_data['create_date'],
-                        'write_date': task_data['write_date'],
-                        'type': 'task',
-                        'search_term': search_term,
-                        'match_in_name': name_match,
-                        'match_in_description': desc_match
-                    }
-                    matching_tasks.append(enriched_task)
+            # Project filter
+            if project_ids:
+                domain.append(('project_id', 'in', project_ids))
+            
+            # Text search
+            if include_descriptions:
+                text_domain = ['|', ('name', 'ilike', search_term), ('description', 'ilike', search_term)]
+            else:
+                text_domain = [('name', 'ilike', search_term)]
+            
+            # Combine domains
+            if domain:
+                final_domain = domain + ['&'] + text_domain if len(domain) == 1 else domain + text_domain
+                # Properly structure the domain
+                if len(domain) == 1:
+                    final_domain = ['&'] + domain + text_domain
+                else:
+                    # Multiple conditions - build properly
+                    final_domain = domain[:]
+                    for condition in text_domain:
+                        final_domain = ['&'] + final_domain + [condition] if isinstance(condition, tuple) else final_domain + [condition]
+            else:
+                final_domain = text_domain
             
             if self.verbose:
-                print(f"📋 Found {len(matching_tasks)} matching tasks")
-            else:
-                print(f" {len(matching_tasks)} found", flush=True)
+                print(f"🔧 Task domain: {final_domain}")
             
-            return matching_tasks
+            tasks = self.tasks.search_records(final_domain)
+            
+            if self.verbose:
+                print(f"📋 Found {len(tasks)} matching tasks")
+            else:
+                print(f" {len(tasks)} found", flush=True)
+            
+            # Cache found tasks and return enriched results
+            enriched_tasks = []
+            for task in tasks:
+                # Extract user ID safely
+                user_id = None
+                user_name = 'Unassigned'
+                
+                if hasattr(task, 'user_ids') and task.user_ids:
+                    try:
+                        if hasattr(task.user_ids, '__len__') and len(task.user_ids) > 0:
+                            first_user = task.user_ids[0]
+                            if hasattr(first_user, 'id'):
+                                user_id = first_user.id
+                                user_name = first_user.name if hasattr(first_user, 'name') else f'User {user_id}'
+                    except:
+                        pass
+                
+                # Cache task data
+                task_data = {
+                    'id': task.id,
+                    'name': task.name,
+                    'description': getattr(task, 'description', '') or '',
+                    'project_id': task.project_id.id if task.project_id else None,
+                    'project_name': task.project_id.name if task.project_id else 'No project',
+                    'user_id': user_id,
+                    'user_name': user_name,
+                    'create_date': str(task.create_date) if task.create_date else '',
+                    'write_date': str(task.write_date) if task.write_date else '',
+                    'stage_id': getattr(task, 'stage_id', None),
+                    'priority': getattr(task, 'priority', '0')
+                }
+                
+                # Cache this task for future lookups
+                self.task_cache[task.id] = task_data
+                
+                # Build project-task mapping
+                if task_data['project_id']:
+                    if task_data['project_id'] not in self.project_task_map:
+                        self.project_task_map[task_data['project_id']] = []
+                    if task.id not in self.project_task_map[task_data['project_id']]:
+                        self.project_task_map[task_data['project_id']].append(task.id)
+                    self.task_project_map[task.id] = task_data['project_id']
+                
+                # Create enriched result
+                enriched_task = {
+                    'id': task_data['id'],
+                    'name': task_data['name'],
+                    'description': task_data['description'],
+                    'project_name': task_data['project_name'],
+                    'project_id': task_data['project_id'],
+                    'stage': task_data['stage_id'],
+                    'user': task_data['user_name'],
+                    'priority': task_data['priority'],
+                    'create_date': task_data['create_date'],
+                    'write_date': task_data['write_date'],
+                    'type': 'task',
+                    'search_term': search_term,
+                    'match_in_name': search_term.lower() in task_data['name'].lower(),
+                    'match_in_description': search_term.lower() in task_data['description'].lower()
+                }
+                enriched_tasks.append(enriched_task)
+            
+            return enriched_tasks
             
         except Exception as e:
             print(f"❌ Error searching tasks: {e}")
@@ -323,16 +398,14 @@ class OdooTextSearch(OdooBase):
             if since:
                 domain.append(('create_date', '>=', since.strftime('%Y-%m-%d %H:%M:%S')))
             
-            # Model filter - use cached IDs for efficiency
+            # Model filter - get IDs from database for efficiency
             if model_type != 'all':
-                # Use cached project and task IDs
-                if not self._project_cache_built:
-                    self._build_project_cache()
-                if not self._task_cache_built:
-                    self._build_task_cache()
+                # Get all project and task IDs directly from database
+                all_projects = self.projects.search_records([])
+                all_tasks = self.tasks.search_records([])
                 
-                project_ids = list(self.project_cache.keys())
-                task_ids = list(self.task_cache.keys())
+                project_ids = [p.id for p in all_projects]
+                task_ids = [t.id for t in all_tasks]
                 
                 model_conditions = []
                 if model_type in ['projects', 'both'] and project_ids:
@@ -427,103 +500,6 @@ class OdooTextSearch(OdooBase):
                 print(f"⚠️ Could not build user cache: {e}")
             self.user_cache = {}
     
-    def _build_project_cache(self):
-        """Build a cache of all projects for efficient lookup"""
-        if self._project_cache_built:
-            return
-            
-        if self.verbose:
-            print("📂 Building project cache...")
-        
-        try:
-            # Get all projects
-            projects = self.projects.search_records([])
-            
-            for project in projects:
-                self.project_cache[project.id] = {
-                    'id': project.id,
-                    'name': project.name,
-                    'description': getattr(project, 'description', '') or '',
-                    'partner_id': project.partner_id.id if project.partner_id else None,
-                    'partner_name': project.partner_id.name if project.partner_id else 'No client',
-                    'user_id': project.user_id.id if project.user_id else None,
-                    'user_name': project.user_id.name if project.user_id else 'Unassigned',
-                    'create_date': str(project.create_date) if project.create_date else '',
-                    'write_date': str(project.write_date) if project.write_date else '',
-                    'stage_id': getattr(project, 'stage_id', None)
-                }
-            
-            self._project_cache_built = True
-            
-            if self.verbose:
-                print(f"📂 Cached {len(self.project_cache)} projects")
-                
-        except Exception as e:
-            if self.verbose:
-                print(f"⚠️ Could not build project cache: {e}")
-            self.project_cache = {}
-    
-    def _build_task_cache(self):
-        """Build a cache of all tasks for efficient lookup"""
-        if self._task_cache_built:
-            return
-            
-        if self.verbose:
-            print("📋 Building task cache...")
-        
-        try:
-            # Get all tasks
-            tasks = self.tasks.search_records([])
-            
-            for task in tasks:
-                # Extract user ID safely
-                user_id = None
-                user_name = 'Unassigned'
-                
-                if hasattr(task, 'user_ids') and task.user_ids:
-                    try:
-                        if hasattr(task.user_ids, '__len__') and len(task.user_ids) > 0:
-                            first_user = task.user_ids[0]
-                            if hasattr(first_user, 'id'):
-                                user_id = first_user.id
-                                user_name = first_user.name if hasattr(first_user, 'name') else f'User {user_id}'
-                    except:
-                        pass
-                
-                # Cache task data
-                task_data = {
-                    'id': task.id,
-                    'name': task.name,
-                    'description': getattr(task, 'description', '') or '',
-                    'project_id': task.project_id.id if task.project_id else None,
-                    'project_name': task.project_id.name if task.project_id else 'No project',
-                    'user_id': user_id,
-                    'user_name': user_name,
-                    'create_date': str(task.create_date) if task.create_date else '',
-                    'write_date': str(task.write_date) if task.write_date else '',
-                    'stage_id': getattr(task, 'stage_id', None),
-                    'priority': getattr(task, 'priority', '0')
-                }
-                
-                self.task_cache[task.id] = task_data
-                
-                # Build project-task mapping
-                if task_data['project_id']:
-                    if task_data['project_id'] not in self.project_task_map:
-                        self.project_task_map[task_data['project_id']] = []
-                    self.project_task_map[task_data['project_id']].append(task.id)
-                    self.task_project_map[task.id] = task_data['project_id']
-            
-            self._task_cache_built = True
-            
-            if self.verbose:
-                print(f"📋 Cached {len(self.task_cache)} tasks")
-                print(f"🔗 Built project-task mappings for {len(self.project_task_map)} projects")
-                
-        except Exception as e:
-            if self.verbose:
-                print(f"⚠️ Could not build task cache: {e}")
-            self.task_cache = {}
     
     def _get_cached_project(self, project_id):
         """Get project from cache, with fallback to direct lookup"""
@@ -667,10 +643,9 @@ class OdooTextSearch(OdooBase):
             if since:
                 since_date = self._parse_time_reference(since)
         
-        # Build all caches for efficient lookups
+        # Build only user cache upfront (fast and small)
         self._build_user_cache()
-        self._build_project_cache()
-        self._build_task_cache()
+        # Projects and tasks will be cached on-demand
         
         results = {
             'projects': [],
