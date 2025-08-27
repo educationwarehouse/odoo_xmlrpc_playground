@@ -825,7 +825,9 @@ class OdooTextSearch(OdooBase):
             print(f"\n📁 FILES ({len(results['files'])})")
             print("-" * 40)
             for i, file in enumerate(results['files'][:limit] if limit else results['files'], 1):
-                print(f"\n{i}. 📄 {file['name']} (ID: {file['id']})")
+                file_url = self.get_file_url(file['id'])
+                file_link = self.create_terminal_link(file_url, file['name'])
+                print(f"\n{i}. 📄 {file_link} (ID: {file['id']})")
                 print(f"   📊 Type: {file['mimetype']}")
                 print(f"   📏 Size: {file['file_size_human']}")
                 

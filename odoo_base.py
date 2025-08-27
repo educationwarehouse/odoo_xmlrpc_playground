@@ -105,6 +105,10 @@ class OdooBase:
         """Get the URL for a message"""
         return f"{self.base_url}/mail/message/{message_id}"
 
+    def get_file_url(self, file_id):
+        """Get the URL for a file/attachment"""
+        return f"{self.base_url}/web/content/{file_id}"
+
     def format_file_size(self, size_bytes):
         """Format file size in human readable format"""
         if not size_bytes:
