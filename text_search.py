@@ -45,36 +45,38 @@ class OdooTextSearch(OdooBase):
 
     def _parse_time_reference(self, time_ref):
         """
-        Parse human-readable time references like:
-        - "1 week", "2 weeks"
-        - "3 days", "1 day"
-        - "1 month", "2 months"
-        - "1 year"
+        Parse human-readable time references in English and Dutch:
+        English: "1 week", "2 weeks", "3 days", "1 day", "1 month", "2 months", "1 year"
+        Dutch: "1 week", "2 weken", "3 dagen", "1 dag", "1 maand", "2 maanden", "1 jaar"
         """
         if not time_ref:
             return None
 
         time_ref = time_ref.lower().strip()
         
-        # Pattern: number + unit
-        pattern = r'(\d+)\s*(day|days|week|weeks|month|months|year|years)'
+        # Pattern: number + unit (English and Dutch)
+        pattern = r'(\d+)\s*(day|days|dag|dagen|week|weeks|weken|month|months|maand|maanden|year|years|jaar|jaren)'
         match = re.match(pattern, time_ref)
         
         if not match:
-            raise ValueError(f"Invalid time reference: {time_ref}. Use format like '1 week', '3 days', '2 months'")
+            raise ValueError(f"Invalid time reference: {time_ref}. Use format like '1 week'/'1 week', '3 days'/'3 dagen', '2 months'/'2 maanden'")
         
         number = int(match.group(1))
         unit = match.group(2)
         
         now = datetime.now()
         
-        if unit in ['day', 'days']:
+        # English and Dutch day units
+        if unit in ['day', 'days', 'dag', 'dagen']:
             return now - timedelta(days=number)
-        elif unit in ['week', 'weeks']:
+        # English and Dutch week units
+        elif unit in ['week', 'weeks', 'weken']:
             return now - timedelta(weeks=number)
-        elif unit in ['month', 'months']:
+        # English and Dutch month units
+        elif unit in ['month', 'months', 'maand', 'maanden']:
             return now - timedelta(days=number * 30)  # Approximate
-        elif unit in ['year', 'years']:
+        # English and Dutch year units
+        elif unit in ['year', 'years', 'jaar', 'jaren']:
             return now - timedelta(days=number * 365)  # Approximate
         
         return None
@@ -669,6 +671,8 @@ Examples:
   python text_search.py "client meeting" --since "3 days" --type projects
   python text_search.py "error" --since "2 weeks" --exclude-logs
   python text_search.py "urgent" --type tasks --no-descriptions
+  python text_search.py "zoekterm" --since "3 dagen"
+  python text_search.py "vergadering" --since "2 weken" --type projects
         """
     )
     

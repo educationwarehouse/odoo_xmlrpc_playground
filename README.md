@@ -23,7 +23,7 @@ python text_search.py "error log" --exclude-logs
 ```
 
 **Opties:**
-- `--since`: Tijd referentie (bijv. "1 week", "3 dagen", "2 maanden")
+- `--since`: Tijd referentie in Engels of Nederlands (bijv. "1 week", "3 days"/"3 dagen", "2 months"/"2 maanden")
 - `--type`: Wat te doorzoeken (all, projects, tasks, logs)
 - `--exclude-logs`: Sluit log berichten uit
 - `--no-descriptions`: Zoek alleen in namen, niet in beschrijvingen
