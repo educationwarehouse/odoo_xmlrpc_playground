@@ -728,9 +728,13 @@ class OdooTextSearch(OdooBase):
                             if user_field:
                                 if hasattr(user_field, 'id'):
                                     user_id = user_field.id
+                                    if self.verbose:
+                                        print(f"🔍 Found user ID {user_id} via {field_name}.id for task {task.id}")
                                     break
                                 elif isinstance(user_field, int):
                                     user_id = user_field
+                                    if self.verbose:
+                                        print(f"🔍 Found user ID {user_id} via {field_name} (int) for task {task.id}")
                                     break
                                 elif str(user_field).startswith('functools.partial'):
                                     # Extract ID from partial object representation
@@ -760,7 +764,9 @@ class OdooTextSearch(OdooBase):
                                                 if self.verbose:
                                                     print(f"🔍 Extracted user ID {user_id} from partial object (alt pattern) for task {task.id}")
                                                 break
-                    except:
+                    except Exception as field_error:
+                        if self.verbose:
+                            print(f"⚠️ Error accessing field {field_name}: {field_error}")
                         continue
                 
                 # Use cached user lookup - ensure user_id is an integer
