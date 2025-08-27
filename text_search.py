@@ -759,6 +759,12 @@ class OdooTextSearch(OdooBase):
                 
                 # Use cached user lookup
                 if user_id:
+                    if self.verbose:
+                        print(f"🔍 Looking up user ID {user_id} in cache of {len(self.user_cache)} users")
+                        if user_id in self.user_cache:
+                            print(f"✅ Found user {user_id}: {self.user_cache[user_id]}")
+                        else:
+                            print(f"❌ User {user_id} not found in cache")
                     user_name = self._get_user_name(user_id)
                 
                 enriched_task = {
