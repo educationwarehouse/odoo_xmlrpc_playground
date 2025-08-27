@@ -504,7 +504,9 @@ class OdooTextSearch(OdooBase):
             print(f"\n💬 MESSAGES ({len(results['messages'])})")
             print("-" * 40)
             for i, message in enumerate(results['messages'][:limit] if limit else results['messages'], 1):
-                print(f"\n{i}. 💬 {message['subject']} (ID: {message['id']})")
+                message_url = self.get_message_url(message['id'])
+                message_link = self.create_terminal_link(message_url, message['subject'])
+                print(f"\n{i}. 💬 {message_link} (ID: {message['id']})")
                 
                 # Create link for related record
                 related_link = message['related_name']

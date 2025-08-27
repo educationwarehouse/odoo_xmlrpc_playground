@@ -96,6 +96,10 @@ class OdooBase:
         """Get the URL for a task"""
         return f"{self.base_url}/odoo/all-tasks/{task_id}"
 
+    def get_message_url(self, message_id):
+        """Get the URL for a message"""
+        return f"{self.base_url}/mail/message/{message_id}"
+
     def format_file_size(self, size_bytes):
         """Format file size in human readable format"""
         if not size_bytes:
