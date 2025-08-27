@@ -17,8 +17,9 @@ Geavanceerde tekst zoekfunctionaliteit voor Odoo projecten en taken.
 ```bash
 python text_search.py "zoekterm" --since "1 week"
 python text_search.py "bug fix" --since "2 dagen" --type tasks
-python text_search.py "client meeting" --since "1 maand" --include-logs
+python text_search.py "client meeting" --since "1 maand"
 python text_search.py "urgent" --type tasks --no-descriptions
+python text_search.py "error log" --exclude-logs
 ```
 
 **Opties:**
