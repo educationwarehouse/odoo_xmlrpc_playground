@@ -27,6 +27,7 @@ from openerp_proxy import Client
 from openerp_proxy.ext.all import *
 import re
 import csv
+import html
 
 
 class OdooTextSearch:
@@ -505,8 +506,11 @@ class OdooTextSearch:
                     print(f"   ✅ Match in name")
                 if project['match_in_description'] and project['description']:
                     print(f"   ✅ Match in description")
-                    # Show snippet of description
-                    desc_snippet = project['description'][:100] + "..." if len(project['description']) > 100 else project['description']
+                    # Convert HTML to markdown and show snippet
+                    markdown_desc = self._html_to_markdown(project['description'])
+                    desc_snippet = markdown_desc[:200] + "..." if len(markdown_desc) > 200 else markdown_desc
+                    # Replace newlines with spaces for compact display
+                    desc_snippet = desc_snippet.replace('\n', ' ').strip()
                     print(f"   📝 Description: {desc_snippet}")
                 print(f"   📅 Modified: {project['write_date']}")
         
@@ -523,8 +527,11 @@ class OdooTextSearch:
                     print(f"   ✅ Match in name")
                 if task['match_in_description'] and task['description']:
                     print(f"   ✅ Match in description")
-                    # Show snippet of description
-                    desc_snippet = task['description'][:100] + "..." if len(task['description']) > 100 else task['description']
+                    # Convert HTML to markdown and show snippet
+                    markdown_desc = self._html_to_markdown(task['description'])
+                    desc_snippet = markdown_desc[:200] + "..." if len(markdown_desc) > 200 else markdown_desc
+                    # Replace newlines with spaces for compact display
+                    desc_snippet = desc_snippet.replace('\n', ' ').strip()
                     print(f"   📝 Description: {desc_snippet}")
                 print(f"   📅 Modified: {task['write_date']}")
         
@@ -539,11 +546,85 @@ class OdooTextSearch:
                 print(f"   📅 Date: {message['date']}")
                 # Show snippet of body
                 if message['body']:
-                    # Strip HTML tags for display
-                    import re
-                    clean_body = re.sub('<[^<]+?>', '', message['body'])
-                    body_snippet = clean_body[:150] + "..." if len(clean_body) > 150 else clean_body
+                    # Convert HTML to markdown for better readability
+                    markdown_body = self._html_to_markdown(message['body'])
+                    body_snippet = markdown_body[:200] + "..." if len(markdown_body) > 200 else markdown_body
+                    # Replace newlines with spaces for compact display
+                    body_snippet = body_snippet.replace('\n', ' ').strip()
                     print(f"   💬 Message: {body_snippet}")
+
+    def _html_to_markdown(self, html_content):
+        """
+        Convert HTML content to readable markdown-like text
+        
+        Args:
+            html_content: HTML string to convert
+            
+        Returns:
+            Cleaned markdown-like text
+        """
+        if not html_content:
+            return ""
+        
+        # Unescape HTML entities first
+        text = html.unescape(html_content)
+        
+        # Convert common HTML tags to markdown equivalents
+        conversions = [
+            # Headers
+            (r'<h1[^>]*>(.*?)</h1>', r'# \1'),
+            (r'<h2[^>]*>(.*?)</h2>', r'## \1'),
+            (r'<h3[^>]*>(.*?)</h3>', r'### \1'),
+            (r'<h4[^>]*>(.*?)</h4>', r'#### \1'),
+            (r'<h5[^>]*>(.*?)</h5>', r'##### \1'),
+            (r'<h6[^>]*>(.*?)</h6>', r'###### \1'),
+            
+            # Text formatting
+            (r'<strong[^>]*>(.*?)</strong>', r'**\1**'),
+            (r'<b[^>]*>(.*?)</b>', r'**\1**'),
+            (r'<em[^>]*>(.*?)</em>', r'*\1*'),
+            (r'<i[^>]*>(.*?)</i>', r'*\1*'),
+            (r'<u[^>]*>(.*?)</u>', r'_\1_'),
+            (r'<code[^>]*>(.*?)</code>', r'`\1`'),
+            
+            # Links
+            (r'<a[^>]*href=["\']([^"\']*)["\'][^>]*>(.*?)</a>', r'[\2](\1)'),
+            
+            # Lists
+            (r'<ul[^>]*>', r''),
+            (r'</ul>', r''),
+            (r'<ol[^>]*>', r''),
+            (r'</ol>', r''),
+            (r'<li[^>]*>(.*?)</li>', r'- \1'),
+            
+            # Paragraphs and breaks
+            (r'<p[^>]*>', r''),
+            (r'</p>', r'\n'),
+            (r'<br[^>]*/?>', r'\n'),
+            (r'<div[^>]*>', r''),
+            (r'</div>', r'\n'),
+            
+            # Blockquotes
+            (r'<blockquote[^>]*>(.*?)</blockquote>', r'> \1'),
+            
+            # Remove remaining HTML tags
+            (r'<[^>]+>', r''),
+            
+            # Clean up whitespace
+            (r'\n\s*\n\s*\n', r'\n\n'),  # Multiple newlines to double
+            (r'^\s+', r''),  # Leading whitespace
+            (r'\s+$', r''),  # Trailing whitespace
+        ]
+        
+        # Apply conversions
+        for pattern, replacement in conversions:
+            text = re.sub(pattern, replacement, text, flags=re.DOTALL | re.IGNORECASE)
+        
+        # Final cleanup
+        text = re.sub(r'\n{3,}', '\n\n', text)  # Max 2 consecutive newlines
+        text = text.strip()
+        
+        return text
 
     def export_results(self, results, filename='text_search_results.csv'):
         """Export search results to CSV"""
