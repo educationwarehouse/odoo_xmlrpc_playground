@@ -558,42 +558,35 @@ class OdooTextSearch(OdooBase):
                                 except:
                                     project_name = 'Project (unavailable)'
                             
-                            # Handle user relationship safely - check if field exists first
+                            # Handle user relationship safely - use read method for better field access
                             assigned_user = 'Unassigned'
                             try:
-                                # Check if user_id field exists on this task model
-                                if hasattr(task, 'user_id'):
-                                    # Try to access the field value
-                                    user_field = getattr(task, 'user_id', None)
-                                    if user_field:
-                                        try:
-                                            # Try direct name access first
-                                            if hasattr(user_field, 'name') and user_field.name:
-                                                assigned_user = user_field.name
-                                            elif hasattr(user_field, 'id'):
-                                                # Get user ID and look up the user record
-                                                user_id = user_field.id
-                                                if self.verbose:
-                                                    print(f"🔍 Looking up user ID {user_id} for file {file.id}")
-                                                user_records = self.client['res.users'].search_records([('id', '=', user_id)])
-                                                if user_records:
-                                                    assigned_user = user_records[0].name
-                                                else:
-                                                    assigned_user = f'User {user_id} (not found)'
-                                            else:
-                                                # Field exists but has no accessible value
-                                                assigned_user = 'User (field inaccessible)'
-                                        except Exception as field_error:
+                                # Use read method to get user_id field value directly
+                                task_data = self.tasks.read(task.id, ['user_id'])
+                                if task_data and 'user_id' in task_data:
+                                    user_id_data = task_data['user_id']
+                                    if user_id_data:
+                                        # user_id_data is typically [id, name] tuple or just id
+                                        if isinstance(user_id_data, (list, tuple)) and len(user_id_data) >= 2:
+                                            assigned_user = user_id_data[1]  # name is second element
+                                        elif isinstance(user_id_data, int):
+                                            # Just an ID, look up the user
                                             if self.verbose:
-                                                print(f"⚠️ Error accessing user_id field for file {file.id}: {field_error}")
-                                            assigned_user = 'User (field access error)'
+                                                print(f"🔍 Looking up user ID {user_id_data} for file {file.id}")
+                                            user_records = self.client['res.users'].search_records([('id', '=', user_id_data)])
+                                            if user_records:
+                                                assigned_user = user_records[0].name
+                                            else:
+                                                assigned_user = f'User {user_id_data} (not found)'
+                                        else:
+                                            assigned_user = 'User (unknown format)'
+                                    # else: user_id is False/None, keep 'Unassigned'
                                 else:
-                                    # user_id field doesn't exist on this model
-                                    assigned_user = 'User (field not available)'
+                                    assigned_user = 'User (field not readable)'
                             except Exception as e:
                                 if self.verbose:
                                     print(f"⚠️ Could not get user info for file {file.id}: {e}")
-                                assigned_user = 'User (unavailable)'
+                                assigned_user = 'User (read error)'
                             
                             enriched_file.update({
                                 'related_type': 'Task',
@@ -662,42 +655,35 @@ class OdooTextSearch(OdooBase):
                     except:
                         project_name = 'Project (unavailable)'
                 
-                # Handle user relationship - check if field exists first
+                # Handle user relationship - use read method for better field access
                 user_name = 'Unassigned'
                 try:
-                    # Check if user_id field exists on this task model
-                    if hasattr(task, 'user_id'):
-                        # Try to access the field value
-                        user_field = getattr(task, 'user_id', None)
-                        if user_field:
-                            try:
-                                # Try direct name access first
-                                if hasattr(user_field, 'name') and user_field.name:
-                                    user_name = user_field.name
-                                elif hasattr(user_field, 'id'):
-                                    # Get user ID and look up the user record
-                                    user_id = user_field.id
-                                    if self.verbose:
-                                        print(f"🔍 Looking up user ID {user_id} for task {task.id}")
-                                    user_records = self.client['res.users'].search_records([('id', '=', user_id)])
-                                    if user_records:
-                                        user_name = user_records[0].name
-                                    else:
-                                        user_name = f'User {user_id} (not found)'
-                                else:
-                                    # Field exists but has no accessible value
-                                    user_name = 'User (field inaccessible)'
-                            except Exception as field_error:
+                    # Use read method to get user_id field value directly
+                    task_data = self.tasks.read(task.id, ['user_id'])
+                    if task_data and 'user_id' in task_data:
+                        user_id_data = task_data['user_id']
+                        if user_id_data:
+                            # user_id_data is typically [id, name] tuple or just id
+                            if isinstance(user_id_data, (list, tuple)) and len(user_id_data) >= 2:
+                                user_name = user_id_data[1]  # name is second element
+                            elif isinstance(user_id_data, int):
+                                # Just an ID, look up the user
                                 if self.verbose:
-                                    print(f"⚠️ Error accessing user_id field for task {task.id}: {field_error}")
-                                user_name = 'User (field access error)'
+                                    print(f"🔍 Looking up user ID {user_id_data} for task {task.id}")
+                                user_records = self.client['res.users'].search_records([('id', '=', user_id_data)])
+                                if user_records:
+                                    user_name = user_records[0].name
+                                else:
+                                    user_name = f'User {user_id_data} (not found)'
+                            else:
+                                user_name = 'User (unknown format)'
+                        # else: user_id is False/None, keep 'Unassigned'
                     else:
-                        # user_id field doesn't exist on this model
-                        user_name = 'User (field not available)'
+                        user_name = 'User (field not readable)'
                 except Exception as e:
                     if self.verbose:
                         print(f"⚠️ Could not get user info for task {task.id}: {e}")
-                    user_name = 'User (unavailable)'
+                    user_name = 'User (read error)'
                 
                 enriched_task = {
                     'id': task.id,
