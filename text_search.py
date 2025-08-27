@@ -572,15 +572,23 @@ class OdooTextSearch(OdooBase):
                                             if hasattr(task.user_id, 'id'):
                                                 user_id = task.user_id.id
                                             elif str(task.user_id).startswith('functools.partial'):
-                                                # Extract ID from partial object representation
-                                                partial_str = str(task.user_id)
-                                                import re
-                                                id_match = re.search(r'\[(\d+)\]', partial_str)
-                                                if id_match:
-                                                    user_id = int(id_match.group(1))
-                                                else:
-                                                    assigned_user = 'User (partial object error)'
-                                                    continue
+                                                # Try to call the partial object to get the actual value
+                                                try:
+                                                    user_id = task.user_id()
+                                                    if self.verbose:
+                                                        print(f"🔍 Partial object resolved to user ID: {user_id}")
+                                                except Exception as partial_error:
+                                                    if self.verbose:
+                                                        print(f"⚠️ Could not resolve partial object: {partial_error}")
+                                                    # Fallback to regex extraction
+                                                    partial_str = str(task.user_id)
+                                                    import re
+                                                    id_match = re.search(r'\[(\d+)\]', partial_str)
+                                                    if id_match:
+                                                        user_id = int(id_match.group(1))
+                                                    else:
+                                                        assigned_user = 'User (partial object error)'
+                                                        continue
                                             else:
                                                 user_id = task.user_id
                                             
@@ -683,15 +691,23 @@ class OdooTextSearch(OdooBase):
                                 if hasattr(task.user_id, 'id'):
                                     user_id = task.user_id.id
                                 elif str(task.user_id).startswith('functools.partial'):
-                                    # Extract ID from partial object representation
-                                    partial_str = str(task.user_id)
-                                    import re
-                                    id_match = re.search(r'\[(\d+)\]', partial_str)
-                                    if id_match:
-                                        user_id = int(id_match.group(1))
-                                    else:
-                                        user_name = 'User (partial object error)'
-                                        continue
+                                    # Try to call the partial object to get the actual value
+                                    try:
+                                        user_id = task.user_id()
+                                        if self.verbose:
+                                            print(f"🔍 Partial object resolved to user ID: {user_id}")
+                                    except Exception as partial_error:
+                                        if self.verbose:
+                                            print(f"⚠️ Could not resolve partial object: {partial_error}")
+                                        # Fallback to regex extraction
+                                        partial_str = str(task.user_id)
+                                        import re
+                                        id_match = re.search(r'\[(\d+)\]', partial_str)
+                                        if id_match:
+                                            user_id = int(id_match.group(1))
+                                        else:
+                                            user_name = 'User (partial object error)'
+                                            continue
                                 else:
                                     user_id = task.user_id
                                 
