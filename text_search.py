@@ -639,9 +639,15 @@ class OdooTextSearch(OdooBase):
                                 except:
                                     continue
                             
-                            # Use cached user lookup
+                            # Use cached user lookup - ensure user_id is an integer
                             if user_id:
-                                assigned_user = self._get_user_name(user_id)
+                                # Make sure user_id is actually an integer, not a partial object
+                                if isinstance(user_id, int):
+                                    assigned_user = self._get_user_name(user_id)
+                                else:
+                                    if self.verbose:
+                                        print(f"⚠️ user_id is not an integer: {type(user_id)} - {user_id}")
+                                    assigned_user = 'User (invalid ID format)'
                             
                             enriched_file.update({
                                 'related_type': 'Task',
@@ -757,15 +763,21 @@ class OdooTextSearch(OdooBase):
                     except:
                         continue
                 
-                # Use cached user lookup
+                # Use cached user lookup - ensure user_id is an integer
                 if user_id:
-                    if self.verbose:
-                        print(f"🔍 Looking up user ID {user_id} in cache of {len(self.user_cache)} users")
-                        if user_id in self.user_cache:
-                            print(f"✅ Found user {user_id}: {self.user_cache[user_id]}")
-                        else:
-                            print(f"❌ User {user_id} not found in cache")
-                    user_name = self._get_user_name(user_id)
+                    # Make sure user_id is actually an integer, not a partial object
+                    if isinstance(user_id, int):
+                        if self.verbose:
+                            print(f"🔍 Looking up user ID {user_id} in cache of {len(self.user_cache)} users")
+                            if user_id in self.user_cache:
+                                print(f"✅ Found user {user_id}: {self.user_cache[user_id]}")
+                            else:
+                                print(f"❌ User {user_id} not found in cache")
+                        user_name = self._get_user_name(user_id)
+                    else:
+                        if self.verbose:
+                            print(f"⚠️ user_id is not an integer: {type(user_id)} - {user_id}")
+                        user_name = 'User (invalid ID format)'
                 
                 enriched_task = {
                     'id': task.id,
