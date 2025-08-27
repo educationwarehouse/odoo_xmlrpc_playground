@@ -563,13 +563,20 @@ class OdooTextSearch(OdooBase):
                             if hasattr(task, 'user_id') and task.user_id:
                                 try:
                                     # Try direct access first
-                                    if hasattr(task.user_id, 'name'):
+                                    if hasattr(task.user_id, 'name') and task.user_id.name:
                                         assigned_user = task.user_id.name
                                     else:
-                                        # If it's just an ID, browse the user record
+                                        # If it's just an ID, search for the user record
                                         user_id = task.user_id.id if hasattr(task.user_id, 'id') else task.user_id
-                                        user_record = self.client['res.users'].browse(user_id)
-                                        assigned_user = user_record.name
+                                        if self.verbose:
+                                            print(f"🔍 Looking up user ID {user_id} for file {file.id}")
+                                        
+                                        # Use search_records instead of browse for better error handling
+                                        user_records = self.client['res.users'].search_records([('id', '=', user_id)])
+                                        if user_records:
+                                            assigned_user = user_records[0].name
+                                        else:
+                                            assigned_user = f'User {user_id} (not found)'
                                 except Exception as e:
                                     if self.verbose:
                                         print(f"⚠️ Could not get user info for file {file.id}: {e}")
@@ -647,13 +654,20 @@ class OdooTextSearch(OdooBase):
                 if hasattr(task, 'user_id') and task.user_id:
                     try:
                         # Try direct access first
-                        if hasattr(task.user_id, 'name'):
+                        if hasattr(task.user_id, 'name') and task.user_id.name:
                             user_name = task.user_id.name
                         else:
-                            # If it's just an ID, browse the user record
+                            # If it's just an ID, search for the user record
                             user_id = task.user_id.id if hasattr(task.user_id, 'id') else task.user_id
-                            user_record = self.client['res.users'].browse(user_id)
-                            user_name = user_record.name
+                            if self.verbose:
+                                print(f"🔍 Looking up user ID {user_id} for task {task.id}")
+                            
+                            # Use search_records instead of browse for better error handling
+                            user_records = self.client['res.users'].search_records([('id', '=', user_id)])
+                            if user_records:
+                                user_name = user_records[0].name
+                            else:
+                                user_name = f'User {user_id} (not found)'
                     except Exception as e:
                         if self.verbose:
                             print(f"⚠️ Could not get user info for task {task.id}: {e}")
