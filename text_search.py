@@ -608,30 +608,42 @@ class OdooTextSearch(OdooBase):
                             assigned_user = 'Unassigned'
                             user_id = None
                             
-                            # Try common user field names
-                            for field_name in ['user_id', 'user_ids', 'assigned_user_id', 'responsible_user_id']:
+                            # Try user fields in order of reliability (based on debug findings)
+                            # user_ids is the correct field, others return task ID incorrectly
+                            for field_name in ['user_ids', 'create_uid', 'write_uid', 'user_id', 'assigned_user_id']:
                                 try:
                                     if hasattr(task, field_name):
                                         user_field = getattr(task, field_name, None)
                                         if user_field:
-                                            if hasattr(user_field, 'id'):
+                                            # Handle RecordList (user_ids field)
+                                            if hasattr(user_field, '__len__') and len(user_field) > 0:
+                                                # This is a RecordList, get the first user
+                                                first_user = user_field[0]
+                                                if hasattr(first_user, 'id'):
+                                                    user_id = first_user.id
+                                                    if self.verbose:
+                                                        print(f"🔍 Found user ID {user_id} via {field_name}[0].id for file {file.id}")
+                                                    break
+                                            # Handle direct Record objects (create_uid, write_uid)
+                                            elif hasattr(user_field, 'id') and not str(user_field).startswith('functools.partial'):
                                                 user_id = user_field.id
                                                 if self.verbose:
                                                     print(f"🔍 Found user ID {user_id} via {field_name}.id for file {file.id}")
                                                 break
+                                            # Handle integer IDs
                                             elif isinstance(user_field, int):
                                                 user_id = user_field
                                                 if self.verbose:
                                                     print(f"🔍 Found user ID {user_id} via {field_name} (int) for file {file.id}")
                                                 break
+                                            # Handle partial objects (but skip if they return task ID)
                                             elif str(user_field).startswith('functools.partial'):
-                                                # Extract ID from partial object representation
                                                 partial_str = str(user_field)
                                                 import re
                                                 id_match = re.search(r'\[(\d+)\]', partial_str)
                                                 if id_match:
                                                     extracted_id = int(id_match.group(1))
-                                                    # Check if extracted ID is the same as task ID (indicates wrong field)
+                                                    # Skip if extracted ID matches task ID (wrong field)
                                                     if extracted_id == task.id:
                                                         if self.verbose:
                                                             print(f"⚠️ Extracted ID {extracted_id} matches task ID, skipping user field {field_name}")
@@ -640,17 +652,6 @@ class OdooTextSearch(OdooBase):
                                                     if self.verbose:
                                                         print(f"🔍 Extracted user ID {user_id} from partial object for file {file.id}")
                                                     break
-                                                else:
-                                                    # Try alternative patterns for partial objects
-                                                    # Sometimes the ID might be in a different format
-                                                    alt_match = re.search(r'(\d+)', partial_str)
-                                                    if alt_match:
-                                                        extracted_id = int(alt_match.group(1))
-                                                        if extracted_id != task.id and extracted_id in self.user_cache:
-                                                            user_id = extracted_id
-                                                            if self.verbose:
-                                                                print(f"🔍 Extracted user ID {user_id} from partial object (alt pattern) for file {file.id}")
-                                                            break
                                 except Exception as field_error:
                                     if self.verbose:
                                         print(f"⚠️ Error accessing field {field_name}: {field_error}")
@@ -737,31 +738,42 @@ class OdooTextSearch(OdooBase):
                 user_name = 'Unassigned'
                 user_id = None
                 
-                # Try common user field names
-                for field_name in ['user_id', 'user_ids', 'assigned_user_id', 'responsible_user_id']:
+                # Try user fields in order of reliability (based on debug findings)
+                # user_ids is the correct field, others return task ID incorrectly
+                for field_name in ['user_ids', 'create_uid', 'write_uid', 'user_id', 'assigned_user_id']:
                     try:
                         if hasattr(task, field_name):
                             user_field = getattr(task, field_name, None)
                             if user_field:
-                                if hasattr(user_field, 'id'):
+                                # Handle RecordList (user_ids field)
+                                if hasattr(user_field, '__len__') and len(user_field) > 0:
+                                    # This is a RecordList, get the first user
+                                    first_user = user_field[0]
+                                    if hasattr(first_user, 'id'):
+                                        user_id = first_user.id
+                                        if self.verbose:
+                                            print(f"🔍 Found user ID {user_id} via {field_name}[0].id for task {task.id}")
+                                        break
+                                # Handle direct Record objects (create_uid, write_uid)
+                                elif hasattr(user_field, 'id') and not str(user_field).startswith('functools.partial'):
                                     user_id = user_field.id
                                     if self.verbose:
                                         print(f"🔍 Found user ID {user_id} via {field_name}.id for task {task.id}")
                                     break
+                                # Handle integer IDs
                                 elif isinstance(user_field, int):
                                     user_id = user_field
                                     if self.verbose:
                                         print(f"🔍 Found user ID {user_id} via {field_name} (int) for task {task.id}")
                                     break
+                                # Handle partial objects (but skip if they return task ID)
                                 elif str(user_field).startswith('functools.partial'):
-                                    # Extract ID from partial object representation
                                     partial_str = str(user_field)
                                     import re
-                                    # Look for [number] pattern in the partial object string
                                     id_match = re.search(r'\[(\d+)\]', partial_str)
                                     if id_match:
                                         extracted_id = int(id_match.group(1))
-                                        # Check if extracted ID is the same as task ID (indicates wrong field)
+                                        # Skip if extracted ID matches task ID (wrong field)
                                         if extracted_id == task.id:
                                             if self.verbose:
                                                 print(f"⚠️ Extracted ID {extracted_id} matches task ID, skipping user field {field_name}")
@@ -770,17 +782,6 @@ class OdooTextSearch(OdooBase):
                                         if self.verbose:
                                             print(f"🔍 Extracted user ID {user_id} from partial object for task {task.id}")
                                         break
-                                    else:
-                                        # Try alternative patterns for partial objects
-                                        # Sometimes the ID might be in a different format
-                                        alt_match = re.search(r'(\d+)', partial_str)
-                                        if alt_match:
-                                            extracted_id = int(alt_match.group(1))
-                                            if extracted_id != task.id and extracted_id in self.user_cache:
-                                                user_id = extracted_id
-                                                if self.verbose:
-                                                    print(f"🔍 Extracted user ID {user_id} from partial object (alt pattern) for task {task.id}")
-                                                break
                     except Exception as field_error:
                         if self.verbose:
                             print(f"⚠️ Error accessing field {field_name}: {field_error}")
