@@ -98,7 +98,7 @@ class OdooTextSearch(OdooBase):
         
         return None
 
-    def search_projects(self, search_term, since=None, include_descriptions=True):
+    def search_projects(self, search_term, since=None, include_descriptions=True, limit=None):
         """
         Search in project names and descriptions using direct database queries
         
@@ -106,6 +106,7 @@ class OdooTextSearch(OdooBase):
             search_term: Text to search for
             since: Datetime to limit search from
             include_descriptions: Whether to search in descriptions
+            limit: Maximum number of results to return
         """
         if self.verbose:
             print(f"🔍 Searching projects for: '{search_term}'")
@@ -138,7 +139,13 @@ class OdooTextSearch(OdooBase):
             if self.verbose:
                 print(f"🔧 Project domain: {final_domain}")
             
-            projects = self.projects.search_records(final_domain)
+            # Apply limit at database level
+            search_kwargs = {}
+            if limit:
+                search_kwargs['limit'] = limit
+                search_kwargs['order'] = 'write_date desc'
+            
+            projects = self.projects.search_records(final_domain, **search_kwargs)
             
             if self.verbose:
                 print(f"📂 Found {len(projects)} matching projects")
@@ -187,7 +194,7 @@ class OdooTextSearch(OdooBase):
             print(f"❌ Error searching projects: {e}")
             return []
 
-    def search_tasks(self, search_term, since=None, include_descriptions=True, project_ids=None):
+    def search_tasks(self, search_term, since=None, include_descriptions=True, project_ids=None, limit=None):
         """
         Search in task names and descriptions using direct database queries
         
@@ -196,6 +203,7 @@ class OdooTextSearch(OdooBase):
             since: Datetime to limit search from
             include_descriptions: Whether to search in descriptions
             project_ids: Limit to specific projects
+            limit: Maximum number of results to return
         """
         if self.verbose:
             print(f"🔍 Searching tasks for: '{search_term}'")
@@ -237,7 +245,13 @@ class OdooTextSearch(OdooBase):
             if self.verbose:
                 print(f"🔧 Task domain: {final_domain}")
             
-            tasks = self.tasks.search_records(final_domain)
+            # Apply limit at database level
+            search_kwargs = {}
+            if limit:
+                search_kwargs['limit'] = limit
+                search_kwargs['order'] = 'write_date desc'
+            
+            tasks = self.tasks.search_records(final_domain, **search_kwargs)
             
             if self.verbose:
                 print(f"📋 Found {len(tasks)} matching tasks")
@@ -312,7 +326,7 @@ class OdooTextSearch(OdooBase):
             print(f"❌ Error searching tasks: {e}")
             return []
 
-    def search_messages(self, search_term, since=None, model_type='both'):
+    def search_messages(self, search_term, since=None, model_type='both', limit=None):
         """
         Search in mail messages (logs) for projects and tasks
         
@@ -320,6 +334,7 @@ class OdooTextSearch(OdooBase):
             search_term: Text to search for
             since: Datetime to limit search from
             model_type: 'projects', 'tasks', or 'both'
+            limit: Maximum number of results to return
         """
         if self.verbose:
             print(f"🔍 Searching messages for: '{search_term}'")
@@ -362,7 +377,13 @@ class OdooTextSearch(OdooBase):
             if self.verbose:
                 print(f"🔧 Message domain: {final_domain}")
             
-            messages = self.messages.search_records(final_domain)
+            # Apply limit at database level
+            search_kwargs = {}
+            if limit:
+                search_kwargs['limit'] = limit
+                search_kwargs['order'] = 'date desc'
+            
+            messages = self.messages.search_records(final_domain, **search_kwargs)
             
             if self.verbose:
                 print(f"💬 Found {len(messages)} matching messages")
@@ -375,7 +396,7 @@ class OdooTextSearch(OdooBase):
             print(f"❌ Error searching messages: {e}")
             return []
 
-    def search_files(self, search_term, since=None, file_types=None, model_type='both'):
+    def search_files(self, search_term, since=None, file_types=None, model_type='both', limit=None):
         """
         Search in file names and metadata for all attachments with optimized queries
         
@@ -384,6 +405,7 @@ class OdooTextSearch(OdooBase):
             since: Datetime to limit search from
             file_types: List of file extensions to filter by (e.g., ['pdf', 'docx'])
             model_type: 'projects', 'tasks', 'both', or 'all' (all includes any model)
+            limit: Maximum number of results to return
         """
         if self.verbose:
             print(f"🔍 Searching files for: '{search_term}'")
@@ -464,8 +486,14 @@ class OdooTextSearch(OdooBase):
             if self.verbose:
                 print(f"🔧 File domain: {final_domain}")
             
+            # Apply limit at database level
+            search_kwargs = {}
+            if limit:
+                search_kwargs['limit'] = limit
+                search_kwargs['order'] = 'create_date desc'
+            
             # Fetch files
-            files = self.attachments.search_records(final_domain)
+            files = self.attachments.search_records(final_domain, **search_kwargs)
             
             if self.verbose:
                 print(f"📁 Found {len(files)} matching files")
@@ -606,7 +634,7 @@ class OdooTextSearch(OdooBase):
         
         return f'User {user_id} (not found)'
 
-    def full_text_search(self, search_term, since=None, search_type='all', include_descriptions=True, include_logs=True, include_files=True, file_types=None):
+    def full_text_search(self, search_term, since=None, search_type='all', include_descriptions=True, include_logs=True, include_files=True, file_types=None, limit=None):
         """
         Comprehensive text search across projects, tasks, logs, and files
         
@@ -618,6 +646,7 @@ class OdooTextSearch(OdooBase):
             include_logs: Search in log messages (default: True)
             include_files: Search in file names and metadata (default: True)
             file_types: List of file extensions to filter by
+            limit: Maximum number of results per category
         """
         if self.verbose:
             print(f"\n🚀 FULL TEXT SEARCH")
@@ -636,6 +665,8 @@ class OdooTextSearch(OdooBase):
             print(f"📁 Include files: {include_files}")
             if file_types:
                 print(f"📄 File types: {', '.join(file_types)}")
+            if limit:
+                print(f"🔢 Limit per category: {limit}")
             print()
         else:
             # Parse time reference
@@ -657,25 +688,25 @@ class OdooTextSearch(OdooBase):
         try:
             # Search projects
             if search_type in ['all', 'projects']:
-                results['projects'] = self.search_projects(search_term, since_date, include_descriptions)
+                results['projects'] = self.search_projects(search_term, since_date, include_descriptions, limit)
             
             if self.verbose:
                 print()  # Add white line between searches
             
             # Search tasks
             if search_type in ['all', 'tasks']:
-                results['tasks'] = self.search_tasks(search_term, since_date, include_descriptions)
+                results['tasks'] = self.search_tasks(search_term, since_date, include_descriptions, None, limit)
             
             # Search messages/logs
             if include_logs and search_type in ['all', 'logs']:
                 model_type = 'both' if search_type == 'all' else search_type
-                results['messages'] = self.search_messages(search_term, since_date, model_type)
+                results['messages'] = self.search_messages(search_term, since_date, model_type, limit)
             
             # Search files
             if include_files or search_type == 'files':
                 # Use 'all' for comprehensive file search when searching all or files specifically
                 model_type = 'all' if search_type in ['all', 'files'] else search_type
-                results['files'] = self.search_files(search_term, since_date, file_types, model_type)
+                results['files'] = self.search_files(search_term, since_date, file_types, model_type, limit)
             
             return results
             
@@ -1666,7 +1697,8 @@ Download files:
             include_descriptions=not args.no_descriptions,
             include_logs=not args.no_logs,
             include_files=not args.no_files or args.type == 'files',
-            file_types=args.file_types
+            file_types=args.file_types,
+            limit=args.limit
         )
         
         # Print results
