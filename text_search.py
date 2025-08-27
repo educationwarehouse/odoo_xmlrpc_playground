@@ -1029,7 +1029,7 @@ Download files:
         """
     )
     
-    parser.add_argument('search_term', help='Text to search for')
+    parser.add_argument('search_term', nargs='?', help='Text to search for (optional when using --download)')
     parser.add_argument('--since', help='Time reference (e.g., "1 week", "3 days", "2 months")')
     parser.add_argument('--type', choices=['all', 'projects', 'tasks', 'logs', 'files'], default='all',
                        help='What to search in (default: all)')
@@ -1074,6 +1074,10 @@ Download files:
         except Exception as e:
             print(f"❌ Download error: {e}")
             return
+    
+    # Check if search_term is provided when not downloading
+    if not args.search_term:
+        parser.error("search_term is required unless using --download")
     
     if not args.verbose:
         print("🔍 Searching...")
