@@ -47,8 +47,18 @@ class OdooTextSearch(OdooBase):
         # Add attachments model for file search
         self.attachments = self.client['ir.attachment']
         
-        # User lookup cache
+        # Aggressive caching system
         self.user_cache = {}
+        self.project_cache = {}  # Cache full project records
+        self.task_cache = {}     # Cache full task records
+        self.project_task_map = {}  # Map project_id -> [task_ids]
+        self.task_project_map = {}  # Map task_id -> project_id
+        self.attachment_cache = {}  # Cache attachment metadata
+        
+        # Cache initialization flags
+        self._user_cache_built = False
+        self._project_cache_built = False
+        self._task_cache_built = False
 
     def _parse_time_reference(self, time_ref):
         """
@@ -90,7 +100,7 @@ class OdooTextSearch(OdooBase):
 
     def search_projects(self, search_term, since=None, include_descriptions=True):
         """
-        Search in project names and descriptions
+        Search in project names and descriptions using cached data
         
         Args:
             search_term: Text to search for
@@ -103,39 +113,52 @@ class OdooTextSearch(OdooBase):
             print(f"🔍 Searching projects...", end="", flush=True)
         
         try:
-            # Build domain for project search
-            domain = []
+            # Ensure project cache is built
+            if not self._project_cache_built:
+                self._build_project_cache()
             
-            # Time filter
-            if since:
-                domain.append(('write_date', '>=', since.strftime('%Y-%m-%d %H:%M:%S')))
+            # Search in cached projects
+            matching_projects = []
+            search_lower = search_term.lower()
             
-            # Text search in name
-            name_domain = [('name', 'ilike', search_term)]
-            
-            if include_descriptions:
-                # Search in both name and description
-                text_domain = ['|', ('name', 'ilike', search_term), ('description', 'ilike', search_term)]
-            else:
-                text_domain = name_domain
-            
-            # Combine domains
-            if domain:
-                final_domain = ['&'] + domain + text_domain
-            else:
-                final_domain = text_domain
+            for project_id, project_data in self.project_cache.items():
+                # Time filter
+                if since:
+                    try:
+                        write_date = datetime.fromisoformat(project_data['write_date'].replace('Z', '+00:00')) if project_data['write_date'] else None
+                        if not write_date or write_date < since:
+                            continue
+                    except:
+                        continue
+                
+                # Text search
+                name_match = search_lower in project_data['name'].lower()
+                desc_match = include_descriptions and search_lower in project_data['description'].lower()
+                
+                if name_match or desc_match:
+                    # Create enriched project data directly from cache
+                    enriched_project = {
+                        'id': project_data['id'],
+                        'name': project_data['name'],
+                        'description': project_data['description'],
+                        'partner': project_data['partner_name'],
+                        'stage': project_data['stage_id'],
+                        'user': project_data['user_name'],
+                        'create_date': project_data['create_date'],
+                        'write_date': project_data['write_date'],
+                        'type': 'project',
+                        'search_term': search_term,
+                        'match_in_name': name_match,
+                        'match_in_description': desc_match
+                    }
+                    matching_projects.append(enriched_project)
             
             if self.verbose:
-                print(f"🔧 Project domain: {final_domain}")
-            
-            projects = self.projects.search_records(final_domain)
-            
-            if self.verbose:
-                print(f"📂 Found {len(projects)} matching projects")
+                print(f"📂 Found {len(matching_projects)} matching projects")
             else:
-                print(f" {len(projects)} found", flush=True)
+                print(f" {len(matching_projects)} found", flush=True)
             
-            return self._enrich_projects(projects, search_term)
+            return matching_projects
             
         except Exception as e:
             print(f"❌ Error searching projects: {e}")
@@ -143,7 +166,7 @@ class OdooTextSearch(OdooBase):
 
     def search_tasks(self, search_term, since=None, include_descriptions=True, project_ids=None):
         """
-        Search in task names and descriptions
+        Search in task names and descriptions using cached data
         
         Args:
             search_term: Text to search for
@@ -157,48 +180,58 @@ class OdooTextSearch(OdooBase):
             print(f"🔍 Searching tasks...", end="", flush=True)
         
         try:
-            # Build domain for task search
-            domain = []
+            # Ensure task cache is built
+            if not self._task_cache_built:
+                self._build_task_cache()
             
-            # Time filter
-            if since:
-                domain.append(('write_date', '>=', since.strftime('%Y-%m-%d %H:%M:%S')))
+            # Search in cached tasks
+            matching_tasks = []
+            search_lower = search_term.lower()
             
-            # Project filter
-            if project_ids:
-                domain.append(('project_id', 'in', project_ids))
-            
-            # Text search
-            if include_descriptions:
-                text_domain = ['|', ('name', 'ilike', search_term), ('description', 'ilike', search_term)]
-            else:
-                text_domain = [('name', 'ilike', search_term)]
-            
-            # Combine domains
-            if domain:
-                final_domain = domain + ['&'] + text_domain if len(domain) == 1 else domain + text_domain
-                # Properly structure the domain
-                if len(domain) == 1:
-                    final_domain = ['&'] + domain + text_domain
-                else:
-                    # Multiple conditions - build properly
-                    final_domain = domain[:]
-                    for condition in text_domain:
-                        final_domain = ['&'] + final_domain + [condition] if isinstance(condition, tuple) else final_domain + [condition]
-            else:
-                final_domain = text_domain
+            for task_id, task_data in self.task_cache.items():
+                # Project filter
+                if project_ids and task_data['project_id'] not in project_ids:
+                    continue
+                
+                # Time filter
+                if since:
+                    try:
+                        write_date = datetime.fromisoformat(task_data['write_date'].replace('Z', '+00:00')) if task_data['write_date'] else None
+                        if not write_date or write_date < since:
+                            continue
+                    except:
+                        continue
+                
+                # Text search
+                name_match = search_lower in task_data['name'].lower()
+                desc_match = include_descriptions and search_lower in task_data['description'].lower()
+                
+                if name_match or desc_match:
+                    # Create enriched task data directly from cache
+                    enriched_task = {
+                        'id': task_data['id'],
+                        'name': task_data['name'],
+                        'description': task_data['description'],
+                        'project_name': task_data['project_name'],
+                        'project_id': task_data['project_id'],
+                        'stage': task_data['stage_id'],
+                        'user': task_data['user_name'],
+                        'priority': task_data['priority'],
+                        'create_date': task_data['create_date'],
+                        'write_date': task_data['write_date'],
+                        'type': 'task',
+                        'search_term': search_term,
+                        'match_in_name': name_match,
+                        'match_in_description': desc_match
+                    }
+                    matching_tasks.append(enriched_task)
             
             if self.verbose:
-                print(f"🔧 Task domain: {final_domain}")
-            
-            tasks = self.tasks.search_records(final_domain)
-            
-            if self.verbose:
-                print(f"📋 Found {len(tasks)} matching tasks")
+                print(f"📋 Found {len(matching_tasks)} matching tasks")
             else:
-                print(f" {len(tasks)} found", flush=True)
+                print(f" {len(matching_tasks)} found", flush=True)
             
-            return self._enrich_tasks(tasks, search_term)
+            return matching_tasks
             
         except Exception as e:
             print(f"❌ Error searching tasks: {e}")
@@ -269,7 +302,7 @@ class OdooTextSearch(OdooBase):
 
     def search_files(self, search_term, since=None, file_types=None, model_type='both'):
         """
-        Search in file names and metadata for all attachments
+        Search in file names and metadata for all attachments with optimized queries
         
         Args:
             search_term: Text to search for in filenames
@@ -290,14 +323,16 @@ class OdooTextSearch(OdooBase):
             if since:
                 domain.append(('create_date', '>=', since.strftime('%Y-%m-%d %H:%M:%S')))
             
-            # Model filter - files attached to specific models or all
+            # Model filter - use cached IDs for efficiency
             if model_type != 'all':
-                # Get all project and task IDs first
-                all_projects = self.projects.search_records([])
-                all_tasks = self.tasks.search_records([])
+                # Use cached project and task IDs
+                if not self._project_cache_built:
+                    self._build_project_cache()
+                if not self._task_cache_built:
+                    self._build_task_cache()
                 
-                project_ids = [p.id for p in all_projects]
-                task_ids = [t.id for t in all_tasks]
+                project_ids = list(self.project_cache.keys())
+                task_ids = list(self.task_cache.keys())
                 
                 model_conditions = []
                 if model_type in ['projects', 'both'] and project_ids:
@@ -356,14 +391,18 @@ class OdooTextSearch(OdooBase):
             if self.verbose:
                 print(f"🔧 File domain: {final_domain}")
             
-            files = self.attachments.search_records(final_domain)
+            # Fetch files with minimal fields initially
+            files = self.attachments.search_records(final_domain, fields=[
+                'id', 'name', 'mimetype', 'file_size', 'create_date', 'write_date',
+                'public', 'res_model', 'res_id'
+            ])
             
             if self.verbose:
                 print(f"📁 Found {len(files)} matching files")
             else:
                 print(f" {len(files)} found", flush=True)
             
-            return self._enrich_files(files, search_term)
+            return self._enrich_files_optimized(files, search_term)
             
         except Exception as e:
             print(f"❌ Error searching files: {e}")
@@ -371,13 +410,17 @@ class OdooTextSearch(OdooBase):
 
     def _build_user_cache(self):
         """Build a cache of all users for efficient lookup"""
+        if self._user_cache_built:
+            return
+            
         if self.verbose:
             print("👥 Building user cache...")
         
         try:
-            # Get all users
-            users = self.client['res.users'].search_records([])
+            # Get all users with minimal fields
+            users = self.client['res.users'].search_records([], fields=['id', 'name'])
             self.user_cache = {user.id: user.name for user in users}
+            self._user_cache_built = True
             
             if self.verbose:
                 print(f"👥 Cached {len(self.user_cache)} users")
@@ -386,6 +429,199 @@ class OdooTextSearch(OdooBase):
             if self.verbose:
                 print(f"⚠️ Could not build user cache: {e}")
             self.user_cache = {}
+    
+    def _build_project_cache(self):
+        """Build a cache of all projects for efficient lookup"""
+        if self._project_cache_built:
+            return
+            
+        if self.verbose:
+            print("📂 Building project cache...")
+        
+        try:
+            # Get all projects with essential fields only
+            projects = self.projects.search_records([], fields=[
+                'id', 'name', 'description', 'partner_id', 'user_id', 
+                'create_date', 'write_date', 'stage_id'
+            ])
+            
+            for project in projects:
+                self.project_cache[project.id] = {
+                    'id': project.id,
+                    'name': project.name,
+                    'description': getattr(project, 'description', '') or '',
+                    'partner_id': project.partner_id.id if project.partner_id else None,
+                    'partner_name': project.partner_id.name if project.partner_id else 'No client',
+                    'user_id': project.user_id.id if project.user_id else None,
+                    'user_name': project.user_id.name if project.user_id else 'Unassigned',
+                    'create_date': str(project.create_date) if project.create_date else '',
+                    'write_date': str(project.write_date) if project.write_date else '',
+                    'stage_id': getattr(project, 'stage_id', None)
+                }
+            
+            self._project_cache_built = True
+            
+            if self.verbose:
+                print(f"📂 Cached {len(self.project_cache)} projects")
+                
+        except Exception as e:
+            if self.verbose:
+                print(f"⚠️ Could not build project cache: {e}")
+            self.project_cache = {}
+    
+    def _build_task_cache(self):
+        """Build a cache of all tasks for efficient lookup"""
+        if self._task_cache_built:
+            return
+            
+        if self.verbose:
+            print("📋 Building task cache...")
+        
+        try:
+            # Get all tasks with essential fields only
+            tasks = self.tasks.search_records([], fields=[
+                'id', 'name', 'description', 'project_id', 'user_ids', 
+                'create_date', 'write_date', 'stage_id', 'priority'
+            ])
+            
+            for task in tasks:
+                # Extract user ID safely
+                user_id = None
+                user_name = 'Unassigned'
+                
+                if hasattr(task, 'user_ids') and task.user_ids:
+                    try:
+                        if hasattr(task.user_ids, '__len__') and len(task.user_ids) > 0:
+                            first_user = task.user_ids[0]
+                            if hasattr(first_user, 'id'):
+                                user_id = first_user.id
+                                user_name = first_user.name if hasattr(first_user, 'name') else f'User {user_id}'
+                    except:
+                        pass
+                
+                # Cache task data
+                task_data = {
+                    'id': task.id,
+                    'name': task.name,
+                    'description': getattr(task, 'description', '') or '',
+                    'project_id': task.project_id.id if task.project_id else None,
+                    'project_name': task.project_id.name if task.project_id else 'No project',
+                    'user_id': user_id,
+                    'user_name': user_name,
+                    'create_date': str(task.create_date) if task.create_date else '',
+                    'write_date': str(task.write_date) if task.write_date else '',
+                    'stage_id': getattr(task, 'stage_id', None),
+                    'priority': getattr(task, 'priority', '0')
+                }
+                
+                self.task_cache[task.id] = task_data
+                
+                # Build project-task mapping
+                if task_data['project_id']:
+                    if task_data['project_id'] not in self.project_task_map:
+                        self.project_task_map[task_data['project_id']] = []
+                    self.project_task_map[task_data['project_id']].append(task.id)
+                    self.task_project_map[task.id] = task_data['project_id']
+            
+            self._task_cache_built = True
+            
+            if self.verbose:
+                print(f"📋 Cached {len(self.task_cache)} tasks")
+                print(f"🔗 Built project-task mappings for {len(self.project_task_map)} projects")
+                
+        except Exception as e:
+            if self.verbose:
+                print(f"⚠️ Could not build task cache: {e}")
+            self.task_cache = {}
+    
+    def _get_cached_project(self, project_id):
+        """Get project from cache, with fallback to direct lookup"""
+        if not self._project_cache_built:
+            self._build_project_cache()
+        
+        if project_id in self.project_cache:
+            return self.project_cache[project_id]
+        
+        # Fallback: direct lookup and cache
+        try:
+            project_records = self.projects.search_records([('id', '=', project_id)], fields=[
+                'id', 'name', 'description', 'partner_id', 'user_id', 
+                'create_date', 'write_date', 'stage_id'
+            ])
+            if project_records:
+                project = project_records[0]
+                project_data = {
+                    'id': project.id,
+                    'name': project.name,
+                    'description': getattr(project, 'description', '') or '',
+                    'partner_id': project.partner_id.id if project.partner_id else None,
+                    'partner_name': project.partner_id.name if project.partner_id else 'No client',
+                    'user_id': project.user_id.id if project.user_id else None,
+                    'user_name': project.user_id.name if project.user_id else 'Unassigned',
+                    'create_date': str(project.create_date) if project.create_date else '',
+                    'write_date': str(project.write_date) if project.write_date else '',
+                    'stage_id': getattr(project, 'stage_id', None)
+                }
+                self.project_cache[project_id] = project_data
+                return project_data
+        except Exception as e:
+            if self.verbose:
+                print(f"⚠️ Could not fetch project {project_id}: {e}")
+        
+        return None
+    
+    def _get_cached_task(self, task_id):
+        """Get task from cache, with fallback to direct lookup"""
+        if not self._task_cache_built:
+            self._build_task_cache()
+        
+        if task_id in self.task_cache:
+            return self.task_cache[task_id]
+        
+        # Fallback: direct lookup and cache
+        try:
+            task_records = self.tasks.search_records([('id', '=', task_id)], fields=[
+                'id', 'name', 'description', 'project_id', 'user_ids', 
+                'create_date', 'write_date', 'stage_id', 'priority'
+            ])
+            if task_records:
+                task = task_records[0]
+                
+                # Extract user ID safely
+                user_id = None
+                user_name = 'Unassigned'
+                
+                if hasattr(task, 'user_ids') and task.user_ids:
+                    try:
+                        if hasattr(task.user_ids, '__len__') and len(task.user_ids) > 0:
+                            first_user = task.user_ids[0]
+                            if hasattr(first_user, 'id'):
+                                user_id = first_user.id
+                                user_name = first_user.name if hasattr(first_user, 'name') else f'User {user_id}'
+                    except:
+                        pass
+                
+                task_data = {
+                    'id': task.id,
+                    'name': task.name,
+                    'description': getattr(task, 'description', '') or '',
+                    'project_id': task.project_id.id if task.project_id else None,
+                    'project_name': task.project_id.name if task.project_id else 'No project',
+                    'user_id': user_id,
+                    'user_name': user_name,
+                    'create_date': str(task.create_date) if task.create_date else '',
+                    'write_date': str(task.write_date) if task.write_date else '',
+                    'stage_id': getattr(task, 'stage_id', None),
+                    'priority': getattr(task, 'priority', '0')
+                }
+                
+                self.task_cache[task_id] = task_data
+                return task_data
+        except Exception as e:
+            if self.verbose:
+                print(f"⚠️ Could not fetch task {task_id}: {e}")
+        
+        return None
 
     def _get_user_name(self, user_id):
         """Get user name from cache, with fallback"""
@@ -446,8 +682,10 @@ class OdooTextSearch(OdooBase):
             if since:
                 since_date = self._parse_time_reference(since)
         
-        # Build user cache for efficient lookups
+        # Build all caches for efficient lookups
         self._build_user_cache()
+        self._build_project_cache()
+        self._build_task_cache()
         
         results = {
             'projects': [],
@@ -486,29 +724,128 @@ class OdooTextSearch(OdooBase):
             return results
 
     def _enrich_projects(self, projects, search_term):
-        """Enrich project results with additional info"""
+        """Enrich project results with cached data - this method is now only used for message-related projects"""
         enriched = []
         
         for project in projects:
             try:
-                enriched_project = {
-                    'id': project.id,
-                    'name': project.name,
-                    'description': getattr(project, 'description', '') or '',
-                    'partner': project.partner_id.name if project.partner_id else 'No client',
-                    'stage': getattr(project, 'stage_id', None),
-                    'user': project.user_id.name if project.user_id else 'Unassigned',
-                    'create_date': str(project.create_date) if project.create_date else '',
-                    'write_date': str(project.write_date) if project.write_date else '',
-                    'type': 'project',
-                    'search_term': search_term,
-                    'match_in_name': search_term.lower() in project.name.lower(),
-                    'match_in_description': search_term.lower() in (getattr(project, 'description', '') or '').lower()
-                }
-                enriched.append(enriched_project)
+                # Get project data from cache if available
+                project_data = self._get_cached_project(project.id)
+                if project_data:
+                    enriched_project = {
+                        'id': project_data['id'],
+                        'name': project_data['name'],
+                        'description': project_data['description'],
+                        'partner': project_data['partner_name'],
+                        'stage': project_data['stage_id'],
+                        'user': project_data['user_name'],
+                        'create_date': project_data['create_date'],
+                        'write_date': project_data['write_date'],
+                        'type': 'project',
+                        'search_term': search_term,
+                        'match_in_name': search_term.lower() in project_data['name'].lower(),
+                        'match_in_description': search_term.lower() in project_data['description'].lower()
+                    }
+                    enriched.append(enriched_project)
+                else:
+                    # Fallback to original method for uncached projects
+                    enriched_project = {
+                        'id': project.id,
+                        'name': project.name,
+                        'description': getattr(project, 'description', '') or '',
+                        'partner': project.partner_id.name if project.partner_id else 'No client',
+                        'stage': getattr(project, 'stage_id', None),
+                        'user': project.user_id.name if project.user_id else 'Unassigned',
+                        'create_date': str(project.create_date) if project.create_date else '',
+                        'write_date': str(project.write_date) if project.write_date else '',
+                        'type': 'project',
+                        'search_term': search_term,
+                        'match_in_name': search_term.lower() in project.name.lower(),
+                        'match_in_description': search_term.lower() in (getattr(project, 'description', '') or '').lower()
+                    }
+                    enriched.append(enriched_project)
                 
             except Exception as e:
                 print(f"⚠️ Error enriching project {project.id}: {e}")
+                continue
+        
+        return enriched
+
+    def _enrich_files_optimized(self, files, search_term):
+        """Enrich file results with cached data for optimal performance"""
+        enriched = []
+        
+        for file in files:
+            try:
+                enriched_file = {
+                    'id': file.id,
+                    'name': file.name,
+                    'mimetype': getattr(file, 'mimetype', '') or 'Unknown',
+                    'file_size': getattr(file, 'file_size', 0) or 0,
+                    'file_size_human': self.format_file_size(getattr(file, 'file_size', 0) or 0),
+                    'create_date': str(file.create_date) if file.create_date else '',
+                    'write_date': str(file.write_date) if file.write_date else '',
+                    'public': getattr(file, 'public', False),
+                    'res_model': file.res_model,
+                    'res_id': file.res_id,
+                    'type': 'file',
+                    'search_term': search_term
+                }
+                
+                # Add model-specific information using cached data
+                if file.res_model == 'project.project':
+                    project_data = self._get_cached_project(file.res_id)
+                    if project_data:
+                        enriched_file.update({
+                            'related_type': 'Project',
+                            'related_name': project_data['name'],
+                            'related_id': project_data['id'],
+                            'project_name': project_data['name'],
+                            'project_id': project_data['id'],
+                            'client': project_data['partner_name']
+                        })
+                    else:
+                        enriched_file.update({
+                            'related_type': 'Project',
+                            'related_name': f'Project {file.res_id}',
+                            'related_id': file.res_id,
+                            'error': 'Project record not found'
+                        })
+                
+                elif file.res_model == 'project.task':
+                    task_data = self._get_cached_task(file.res_id)
+                    if task_data:
+                        enriched_file.update({
+                            'related_type': 'Task',
+                            'related_name': task_data['name'],
+                            'related_id': task_data['id'],
+                            'task_name': task_data['name'],
+                            'task_id': task_data['id'],
+                            'project_name': task_data['project_name'],
+                            'project_id': task_data['project_id'],
+                            'assigned_user': task_data['user_name']
+                        })
+                    else:
+                        enriched_file.update({
+                            'related_type': 'Task',
+                            'related_name': f'Task {file.res_id}',
+                            'related_id': file.res_id,
+                            'error': 'Task record not found'
+                        })
+                
+                else:
+                    # Handle other models
+                    enriched_file.update({
+                        'related_type': file.res_model or 'Unknown',
+                        'related_name': f'{file.res_model} {file.res_id}' if file.res_model and file.res_id else 'No relation',
+                        'related_id': file.res_id,
+                        'model_name': file.res_model or 'Unknown'
+                    })
+                
+                enriched.append(enriched_file)
+                
+            except Exception as e:
+                print(f"⚠️ Error enriching file {file.id}: {e}")
                 continue
         
         return enriched
@@ -710,140 +1047,103 @@ class OdooTextSearch(OdooBase):
         return enriched
 
     def _enrich_tasks(self, tasks, search_term):
-        """Enrich task results with additional info"""
+        """Enrich task results with cached data - this method is now only used for message-related tasks"""
         enriched = []
         
         for task in tasks:
             try:
-                # Handle functools.partial objects by browsing the record properly
-                if hasattr(task, 'id') and not hasattr(task, 'name'):
-                    # This is likely a partial object, browse it properly
-                    task = self.tasks.browse(task.id)
-                
-                # Safely get attributes with fallbacks
-                task_name = getattr(task, 'name', f'Task {task.id}')
-                task_description = getattr(task, 'description', '') or ''
-                
-                # Handle project relationship
-                project_name = 'No project'
-                project_id = None
-                if hasattr(task, 'project_id') and task.project_id:
-                    try:
-                        project_name = task.project_id.name if hasattr(task.project_id, 'name') else f'Project {task.project_id.id}'
-                        project_id = task.project_id.id if hasattr(task.project_id, 'id') else task.project_id
-                    except:
-                        project_name = 'Project (unavailable)'
-                
-                # Handle user relationship - try different field names
-                user_name = 'Unassigned'
-                user_id = None
-                
-                # Try user fields in order of reliability (based on debug findings)
-                # user_ids is the correct field, others return task ID incorrectly
-                for field_name in ['user_ids', 'create_uid', 'write_uid', 'user_id', 'assigned_user_id']:
-                    try:
-                        if hasattr(task, field_name):
-                            user_field = getattr(task, field_name, None)
-                            if user_field:
-                                # Handle RecordList (user_ids field)
-                                if hasattr(user_field, '__len__') and len(user_field) > 0:
-                                    # This is a RecordList, get the first user
-                                    first_user = user_field[0]
-                                    if hasattr(first_user, 'id'):
-                                        user_id = first_user.id
-                                        if self.verbose:
-                                            print(f"🔍 Found user ID {user_id} via {field_name}[0].id for task {task.id}")
+                # Get task data from cache if available
+                task_data = self._get_cached_task(task.id)
+                if task_data:
+                    enriched_task = {
+                        'id': task_data['id'],
+                        'name': task_data['name'],
+                        'description': task_data['description'],
+                        'project_name': task_data['project_name'],
+                        'project_id': task_data['project_id'],
+                        'stage': task_data['stage_id'],
+                        'user': task_data['user_name'],
+                        'priority': task_data['priority'],
+                        'create_date': task_data['create_date'],
+                        'write_date': task_data['write_date'],
+                        'type': 'task',
+                        'search_term': search_term,
+                        'match_in_name': search_term.lower() in task_data['name'].lower(),
+                        'match_in_description': search_term.lower() in task_data['description'].lower()
+                    }
+                    enriched.append(enriched_task)
+                else:
+                    # Fallback to original method for uncached tasks
+                    # Handle functools.partial objects by browsing the record properly
+                    if hasattr(task, 'id') and not hasattr(task, 'name'):
+                        # This is likely a partial object, browse it properly
+                        task = self.tasks.browse(task.id)
+                    
+                    # Safely get attributes with fallbacks
+                    task_name = getattr(task, 'name', f'Task {task.id}')
+                    task_description = getattr(task, 'description', '') or ''
+                    
+                    # Handle project relationship
+                    project_name = 'No project'
+                    project_id = None
+                    if hasattr(task, 'project_id') and task.project_id:
+                        try:
+                            project_name = task.project_id.name if hasattr(task.project_id, 'name') else f'Project {task.project_id.id}'
+                            project_id = task.project_id.id if hasattr(task.project_id, 'id') else task.project_id
+                        except:
+                            project_name = 'Project (unavailable)'
+                    
+                    # Handle user relationship using cache
+                    user_name = 'Unassigned'
+                    user_id = None
+                    
+                    # Try user fields in order of reliability
+                    for field_name in ['user_ids', 'create_uid', 'write_uid', 'user_id', 'assigned_user_id']:
+                        try:
+                            if hasattr(task, field_name):
+                                user_field = getattr(task, field_name, None)
+                                if user_field:
+                                    # Handle RecordList (user_ids field)
+                                    if hasattr(user_field, '__len__') and len(user_field) > 0:
+                                        first_user = user_field[0]
+                                        if hasattr(first_user, 'id'):
+                                            user_id = first_user.id
+                                            break
+                                    # Handle direct Record objects
+                                    elif hasattr(user_field, 'id') and not str(user_field).startswith('functools.partial'):
+                                        user_id = user_field.id
                                         break
-                                # Handle direct Record objects (create_uid, write_uid)
-                                elif hasattr(user_field, 'id') and not str(user_field).startswith('functools.partial'):
-                                    user_id = user_field.id
-                                    if self.verbose:
-                                        print(f"🔍 Found user ID {user_id} via {field_name}.id for task {task.id}")
-                                    break
-                                # Handle integer IDs
-                                elif isinstance(user_field, int):
-                                    user_id = user_field
-                                    if self.verbose:
-                                        print(f"🔍 Found user ID {user_id} via {field_name} (int) for task {task.id}")
-                                    break
-                                # Handle partial objects (but skip if they return task ID)
-                                elif str(user_field).startswith('functools.partial'):
-                                    partial_str = str(user_field)
-                                    import re
-                                    id_match = re.search(r'\[(\d+)\]', partial_str)
-                                    if id_match:
-                                        extracted_id = int(id_match.group(1))
-                                        # Skip if extracted ID matches task ID (wrong field)
-                                        if extracted_id == task.id:
-                                            if self.verbose:
-                                                print(f"⚠️ Extracted ID {extracted_id} matches task ID, skipping user field {field_name}")
-                                            continue
-                                        user_id = extracted_id
-                                        if self.verbose:
-                                            print(f"🔍 Extracted user ID {user_id} from partial object for task {task.id}")
+                                    # Handle integer IDs
+                                    elif isinstance(user_field, int):
+                                        user_id = user_field
                                         break
-                    except Exception as field_error:
-                        if self.verbose:
-                            print(f"⚠️ Error accessing field {field_name}: {field_error}")
-                        continue
-                
-                # Use cached user lookup - ensure user_id is an integer
-                if user_id:
-                    # Make sure user_id is actually an integer, not a partial object
-                    if isinstance(user_id, int):
-                        if self.verbose:
-                            print(f"🔍 Looking up user ID {user_id} in cache of {len(self.user_cache)} users")
-                            if user_id in self.user_cache:
-                                print(f"✅ Found user {user_id}: {self.user_cache[user_id]}")
-                            else:
-                                print(f"❌ User {user_id} not found in cache")
+                        except Exception:
+                            continue
+                    
+                    # Use cached user lookup
+                    if user_id and isinstance(user_id, int):
                         user_name = self._get_user_name(user_id)
-                    else:
-                        if self.verbose:
-                            print(f"⚠️ user_id is not an integer: {type(user_id)} - {user_id}")
-                        user_name = 'User (invalid ID format)'
-                
-                enriched_task = {
-                    'id': task.id,
-                    'name': task_name,
-                    'description': task_description,
-                    'project_name': project_name,
-                    'project_id': project_id,
-                    'stage': getattr(task, 'stage_id', None),
-                    'user': user_name,
-                    'priority': getattr(task, 'priority', '0'),
-                    'create_date': str(getattr(task, 'create_date', '')) if getattr(task, 'create_date', None) else '',
-                    'write_date': str(getattr(task, 'write_date', '')) if getattr(task, 'write_date', None) else '',
-                    'type': 'task',
-                    'search_term': search_term,
-                    'match_in_name': search_term.lower() in task_name.lower(),
-                    'match_in_description': search_term.lower() in task_description.lower()
-                }
-                enriched.append(enriched_task)
+                    
+                    enriched_task = {
+                        'id': task.id,
+                        'name': task_name,
+                        'description': task_description,
+                        'project_name': project_name,
+                        'project_id': project_id,
+                        'stage': getattr(task, 'stage_id', None),
+                        'user': user_name,
+                        'priority': getattr(task, 'priority', '0'),
+                        'create_date': str(getattr(task, 'create_date', '')) if getattr(task, 'create_date', None) else '',
+                        'write_date': str(getattr(task, 'write_date', '')) if getattr(task, 'write_date', None) else '',
+                        'type': 'task',
+                        'search_term': search_term,
+                        'match_in_name': search_term.lower() in task_name.lower(),
+                        'match_in_description': search_term.lower() in task_description.lower()
+                    }
+                    enriched.append(enriched_task)
                 
             except Exception as e:
                 print(f"⚠️ Error enriching task {getattr(task, 'id', 'unknown')}: {e}")
-                # Add minimal info even if enrichment fails
-                try:
-                    enriched.append({
-                        'id': getattr(task, 'id', 'unknown'),
-                        'name': f'Task {getattr(task, "id", "unknown")} (error)',
-                        'description': '',
-                        'project_name': 'Unknown',
-                        'project_id': None,
-                        'stage': None,
-                        'user': 'Unknown',
-                        'priority': '0',
-                        'create_date': '',
-                        'write_date': '',
-                        'type': 'task',
-                        'search_term': search_term,
-                        'match_in_name': False,
-                        'match_in_description': False,
-                        'error': str(e)
-                    })
-                except:
-                    pass
                 continue
         
         return enriched
