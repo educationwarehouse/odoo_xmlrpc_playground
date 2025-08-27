@@ -1326,7 +1326,7 @@ def main():
 Examples:
   python text_search.py "bug fix" --since "1 week"
   python text_search.py "client meeting" --since "3 days" --type projects
-  python text_search.py "error" --since "2 weeks" --exclude-logs
+  python text_search.py "error" --since "2 weeks" --no-logs
   python text_search.py "urgent" --type tasks --no-descriptions
   python text_search.py "report" --include-files --file-types pdf docx
   python text_search.py "screenshot" --files-only --file-types png jpg
@@ -1344,9 +1344,9 @@ Download files:
     parser.add_argument('--since', help='Time reference (e.g., "1 week", "3 days", "2 months")')
     parser.add_argument('--type', choices=['all', 'projects', 'tasks', 'logs', 'files'], default='all',
                        help='What to search in (default: all). Use "files" to search ALL attachments regardless of model.')
-    parser.add_argument('--exclude-logs', action='store_true',
+    parser.add_argument('--no-logs', action='store_true',
                        help='Exclude search in log messages (logs included by default)')
-    parser.add_argument('--exclude-files', action='store_true',
+    parser.add_argument('--no-files', action='store_true',
                        help='Exclude search in file names and metadata (files included by default)')
     parser.add_argument('--files-only', action='store_true',
                        help='Search only in files (equivalent to --type files)')
@@ -1370,7 +1370,7 @@ Download files:
     # Handle files-only flag
     if args.files_only:
         args.type = 'files'
-        args.exclude_files = False
+        args.no_files = False
     
     # Handle download request
     if args.download:
@@ -1404,8 +1404,8 @@ Download files:
             since=args.since,
             search_type=args.type,
             include_descriptions=not args.no_descriptions,
-            include_logs=not args.exclude_logs,
-            include_files=not args.exclude_files or args.type == 'files',
+            include_logs=not args.no_logs,
+            include_files=not args.no_files or args.type == 'files',
             file_types=args.file_types
         )
         
