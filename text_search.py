@@ -96,6 +96,8 @@ class OdooTextSearch(OdooBase):
         """
         if self.verbose:
             print(f"🔍 Searching projects for: '{search_term}'")
+        else:
+            print(f"🔍 Searching projects...", end="", flush=True)
         
         try:
             # Build domain for project search
@@ -127,6 +129,8 @@ class OdooTextSearch(OdooBase):
             
             if self.verbose:
                 print(f"📂 Found {len(projects)} matching projects")
+            else:
+                print(f" {len(projects)} found", flush=True)
             
             return self._enrich_projects(projects, search_term)
             
@@ -146,6 +150,8 @@ class OdooTextSearch(OdooBase):
         """
         if self.verbose:
             print(f"🔍 Searching tasks for: '{search_term}'")
+        else:
+            print(f"🔍 Searching tasks...", end="", flush=True)
         
         try:
             # Build domain for task search
@@ -186,6 +192,8 @@ class OdooTextSearch(OdooBase):
             
             if self.verbose:
                 print(f"📋 Found {len(tasks)} matching tasks")
+            else:
+                print(f" {len(tasks)} found", flush=True)
             
             return self._enrich_tasks(tasks, search_term)
             
@@ -204,6 +212,8 @@ class OdooTextSearch(OdooBase):
         """
         if self.verbose:
             print(f"🔍 Searching messages for: '{search_term}'")
+        else:
+            print(f"🔍 Searching messages...", end="", flush=True)
         
         try:
             # Build domain for message search
@@ -245,6 +255,8 @@ class OdooTextSearch(OdooBase):
             
             if self.verbose:
                 print(f"💬 Found {len(messages)} matching messages")
+            else:
+                print(f" {len(messages)} found", flush=True)
             
             return self._enrich_messages(messages, search_term)
             
@@ -264,6 +276,8 @@ class OdooTextSearch(OdooBase):
         """
         if self.verbose:
             print(f"🔍 Searching files for: '{search_term}'")
+        else:
+            print(f"🔍 Searching files...", end="", flush=True)
         
         try:
             # Build domain for file search
@@ -343,6 +357,8 @@ class OdooTextSearch(OdooBase):
             
             if self.verbose:
                 print(f"📁 Found {len(files)} matching files")
+            else:
+                print(f" {len(files)} found", flush=True)
             
             return self._enrich_files(files, search_term)
             
@@ -734,16 +750,30 @@ class OdooTextSearch(OdooBase):
         total_found = len(results.get('projects', [])) + len(results.get('tasks', [])) + len(results.get('messages', [])) + len(results.get('files', []))
         
         if total_found == 0:
+            # Clear the search progress line
+            if not self.verbose:
+                print("\r" + " " * 80 + "\r", end="")
             print("📭 No results found.")
             return
         
-        print(f"\n📊 SEARCH RESULTS SUMMARY")
+        # Clear the search progress line and show results
+        if not self.verbose:
+            print("\r" + " " * 80 + "\r", end="")
+        
+        print(f"📊 SEARCH RESULTS SUMMARY")
         print(f"=" * 50)
         print(f"📂 Projects: {len(results.get('projects', []))}")
         print(f"📋 Tasks: {len(results.get('tasks', []))}")
         print(f"💬 Messages: {len(results.get('messages', []))}")
         print(f"📁 Files: {len(results.get('files', []))}")
         print(f"📊 Total: {total_found}")
+        
+        # Sort all results by date descending
+        for result_type in ['projects', 'tasks', 'messages', 'files']:
+            if results.get(result_type):
+                # Sort by write_date for projects/tasks, date for messages, create_date for files
+                date_field = 'date' if result_type == 'messages' else ('create_date' if result_type == 'files' else 'write_date')
+                results[result_type].sort(key=lambda x: x.get(date_field, ''), reverse=True)
         
         # Print projects
         if results.get('projects'):
@@ -844,7 +874,11 @@ class OdooTextSearch(OdooBase):
                     print(f"   📎 Attached to: {related_link} ({file['related_type']})")
                 
                 if file.get('project_name') and file['related_type'] == 'Task':
-                    print(f"   📂 Project: {file['project_name']}")
+                    project_link = file['project_name']
+                    if file.get('project_id'):
+                        project_url = self.get_project_url(file['project_id'])
+                        project_link = self.create_terminal_link(project_url, file['project_name'])
+                    print(f"   📂 Project: {project_link}")
                 
                 if file.get('assigned_user') and not str(file['assigned_user']).startswith('functools.partial'):
                     print(f"   👤 Assigned: {file['assigned_user']}")
@@ -1208,9 +1242,7 @@ Download files:
     if not args.search_term:
         parser.error("search_term is required unless using --download")
     
-    if not args.verbose:
-        print("🔍 Searching...")
-    else:
+    if args.verbose:
         print("🚀 Odoo Project Text Search")
         print("=" * 50)
     
