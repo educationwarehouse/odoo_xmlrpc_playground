@@ -234,7 +234,7 @@ class OdooTextSearch(OdooBase):
             print(f"❌ Error searching messages: {e}")
             return []
 
-    def full_text_search(self, search_term, since=None, search_type='all', include_descriptions=True, include_logs=False):
+    def full_text_search(self, search_term, since=None, search_type='all', include_descriptions=True, include_logs=True):
         """
         Comprehensive text search across projects, tasks, and optionally logs
         
@@ -243,7 +243,7 @@ class OdooTextSearch(OdooBase):
             since: Time reference string (e.g., "1 week", "3 days")
             search_type: 'all', 'projects', 'tasks', 'logs'
             include_descriptions: Search in descriptions
-            include_logs: Search in log messages
+            include_logs: Search in log messages (default: True)
         """
         print(f"\n🚀 FULL TEXT SEARCH")
         print(f"=" * 60)
@@ -648,7 +648,7 @@ def main():
 Examples:
   python text_search.py "bug fix" --since "1 week"
   python text_search.py "client meeting" --since "3 days" --type projects
-  python text_search.py "error" --since "2 weeks" --include-logs
+  python text_search.py "error" --since "2 weeks" --exclude-logs
   python text_search.py "urgent" --type tasks --no-descriptions
         """
     )
@@ -657,8 +657,8 @@ Examples:
     parser.add_argument('--since', help='Time reference (e.g., "1 week", "3 days", "2 months")')
     parser.add_argument('--type', choices=['all', 'projects', 'tasks', 'logs'], default='all',
                        help='What to search in (default: all)')
-    parser.add_argument('--include-logs', action='store_true',
-                       help='Include search in log messages')
+    parser.add_argument('--exclude-logs', action='store_true',
+                       help='Exclude search in log messages (logs included by default)')
     parser.add_argument('--no-descriptions', action='store_true',
                        help='Do not search in descriptions, only names/subjects')
     parser.add_argument('--limit', type=int, help='Limit number of results to display')
@@ -679,7 +679,7 @@ Examples:
             since=args.since,
             search_type=args.type,
             include_descriptions=not args.no_descriptions,
-            include_logs=args.include_logs
+            include_logs=not args.exclude_logs
         )
         
         # Print results
