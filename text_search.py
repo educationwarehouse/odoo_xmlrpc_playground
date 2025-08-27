@@ -276,6 +276,21 @@ class OdooTextSearch(OdooBase):
                     except:
                         pass
                 
+                # Get stage/status information
+                stage_name = 'No stage'
+                stage_id = None
+                if hasattr(task, 'stage_id') and task.stage_id:
+                    try:
+                        if hasattr(task.stage_id, 'name'):
+                            stage_name = task.stage_id.name
+                            stage_id = task.stage_id.id if hasattr(task.stage_id, 'id') else task.stage_id
+                        else:
+                            # stage_id might be just an ID, try to get the name
+                            stage_id = task.stage_id
+                            stage_name = f'Stage {stage_id}'
+                    except:
+                        stage_name = 'Stage (unavailable)'
+
                 # Cache task data
                 task_data = {
                     'id': task.id,
@@ -287,7 +302,8 @@ class OdooTextSearch(OdooBase):
                     'user_name': user_name,
                     'create_date': str(task.create_date) if task.create_date else '',
                     'write_date': str(task.write_date) if task.write_date else '',
-                    'stage_id': getattr(task, 'stage_id', None),
+                    'stage_id': stage_id,
+                    'stage_name': stage_name,
                     'priority': getattr(task, 'priority', '0')
                 }
                 
@@ -309,7 +325,8 @@ class OdooTextSearch(OdooBase):
                     'description': task_data['description'],
                     'project_name': task_data['project_name'],
                     'project_id': task_data['project_id'],
-                    'stage': task_data['stage_id'],
+                    'stage': task_data['stage_name'],
+                    'stage_id': task_data['stage_id'],
                     'user': task_data['user_name'],
                     'priority': task_data['priority'],
                     'create_date': task_data['create_date'],
@@ -591,6 +608,21 @@ class OdooTextSearch(OdooBase):
                     except:
                         pass
                 
+                # Get stage/status information
+                stage_name = 'No stage'
+                stage_id = None
+                if hasattr(task, 'stage_id') and task.stage_id:
+                    try:
+                        if hasattr(task.stage_id, 'name'):
+                            stage_name = task.stage_id.name
+                            stage_id = task.stage_id.id if hasattr(task.stage_id, 'id') else task.stage_id
+                        else:
+                            # stage_id might be just an ID, try to get the name
+                            stage_id = task.stage_id
+                            stage_name = f'Stage {stage_id}'
+                    except:
+                        stage_name = 'Stage (unavailable)'
+
                 task_data = {
                     'id': task.id,
                     'name': task.name,
@@ -601,7 +633,8 @@ class OdooTextSearch(OdooBase):
                     'user_name': user_name,
                     'create_date': str(task.create_date) if task.create_date else '',
                     'write_date': str(task.write_date) if task.write_date else '',
-                    'stage_id': getattr(task, 'stage_id', None),
+                    'stage_id': stage_id,
+                    'stage_name': stage_name,
                     'priority': getattr(task, 'priority', '0')
                 }
                 
@@ -1053,7 +1086,8 @@ class OdooTextSearch(OdooBase):
                         'description': task_data['description'],
                         'project_name': task_data['project_name'],
                         'project_id': task_data['project_id'],
-                        'stage': task_data['stage_id'],
+                        'stage': task_data['stage_name'],
+                        'stage_id': task_data['stage_id'],
                         'user': task_data['user_name'],
                         'priority': task_data['priority'],
                         'create_date': task_data['create_date'],
@@ -1116,13 +1150,29 @@ class OdooTextSearch(OdooBase):
                     if user_id and isinstance(user_id, int):
                         user_name = self._get_user_name(user_id)
                     
+                    # Handle stage/status information
+                    stage_name = 'No stage'
+                    stage_id = None
+                    if hasattr(task, 'stage_id') and task.stage_id:
+                        try:
+                            if hasattr(task.stage_id, 'name'):
+                                stage_name = task.stage_id.name
+                                stage_id = task.stage_id.id if hasattr(task.stage_id, 'id') else task.stage_id
+                            else:
+                                # stage_id might be just an ID, try to get the name
+                                stage_id = task.stage_id
+                                stage_name = f'Stage {stage_id}'
+                        except:
+                            stage_name = 'Stage (unavailable)'
+                    
                     enriched_task = {
                         'id': task.id,
                         'name': task_name,
                         'description': task_description,
                         'project_name': project_name,
                         'project_id': project_id,
-                        'stage': getattr(task, 'stage_id', None),
+                        'stage': stage_name,
+                        'stage_id': stage_id,
                         'user': user_name,
                         'priority': getattr(task, 'priority', '0'),
                         'create_date': str(getattr(task, 'create_date', '')) if getattr(task, 'create_date', None) else '',
@@ -1447,6 +1497,8 @@ class OdooTextSearch(OdooBase):
         # Show task details with proper indentation
         if self.verbose or (task['user'] and task['user'] != 'Unassigned'):
             print(f"{indent}👤 {task['user']}")
+        if self.verbose or (task['stage'] and task['stage'] != 'No stage'):
+            print(f"{indent}📊 {task['stage']}")
         if self.verbose or (task['priority'] and task['priority'] != '0'):
             print(f"{indent}🔥 {task['priority']}")
         
@@ -1511,6 +1563,8 @@ class OdooTextSearch(OdooBase):
                 print(f"   📂 {task['project_name']}")
         if self.verbose or (task['user'] and task['user'] != 'Unassigned'):
             print(f"   👤 {task['user']}")
+        if self.verbose or (task['stage'] and task['stage'] != 'No stage'):
+            print(f"   📊 {task['stage']}")
         if self.verbose or (task['priority'] and task['priority'] != '0'):
             print(f"   🔥 {task['priority']}")
         
