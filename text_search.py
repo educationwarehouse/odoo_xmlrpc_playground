@@ -1260,19 +1260,20 @@ class OdooTextSearch(OdooBase):
             # Try to place under task's project
             elif message.get('related_type') == 'project.task' and message.get('res_id'):
                 task_id = message['res_id']
-                # First check if the task is in our found tasks
+                
+                # First check if the task is in our found tasks and get its project
                 task_project_id = None
                 for task in results.get('tasks', []):
                     if task['id'] == task_id:
                         task_project_id = task.get('project_id')
                         break
                 
-                # If we found the task's project, try to place the message there
+                # If we found the task's project in our results, place the message there
                 if task_project_id and task_project_id in hierarchy['projects']:
                     hierarchy['projects'][task_project_id]['messages'].append(message)
                     placed = True
                 else:
-                    # Fallback: search through all projects' tasks
+                    # Fallback: search through all projects' tasks that are already grouped
                     for project_id, project_data in hierarchy['projects'].items():
                         for task in project_data['tasks']:
                             if task['id'] == task_id:
@@ -1281,6 +1282,22 @@ class OdooTextSearch(OdooBase):
                                 break
                         if placed:
                             break
+                    
+                    # If still not placed, try to get the task from database to find its project
+                    if not placed:
+                        try:
+                            # Look up the task directly to get its project
+                            task_records = self.tasks.search_records([('id', '=', task_id)])
+                            if task_records:
+                                task = task_records[0]
+                                if hasattr(task, 'project_id') and task.project_id:
+                                    task_project_id = task.project_id.id if hasattr(task.project_id, 'id') else task.project_id
+                                    if task_project_id in hierarchy['projects']:
+                                        hierarchy['projects'][task_project_id]['messages'].append(message)
+                                        placed = True
+                        except Exception as e:
+                            if self.verbose:
+                                print(f"⚠️ Could not lookup task {task_id} for message placement: {e}")
             
             if not placed:
                 hierarchy['orphaned_messages'].append(message)
