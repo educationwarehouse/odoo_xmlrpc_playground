@@ -1225,9 +1225,9 @@ class OdooTextSearch(OdooBase):
                 
                 # Only show non-empty fields or when verbose
                 if self.verbose or (project['partner'] and project['partner'] != 'No client'):
-                    print(f"   🏢 Client: {project['partner']}")
+                    print(f"   🏢 {project['partner']}")
                 if self.verbose or (project['user'] and project['user'] != 'Unassigned'):
-                    print(f"   👤 Manager: {project['user']}")
+                    print(f"   👤 {project['user']}")
                 
                 # Only show match indicators when verbose
                 if self.verbose:
@@ -1243,9 +1243,9 @@ class OdooTextSearch(OdooBase):
                     desc_snippet = markdown_desc[:200] + "..." if len(markdown_desc) > 200 else markdown_desc
                     # Replace newlines with spaces for compact display
                     desc_snippet = desc_snippet.replace('\n', ' ').strip()
-                    print(f"   📝 Description: {desc_snippet}")
+                    print(f"   📝 {desc_snippet}")
                 
-                print(f"   📅 Modified: {project['write_date']}")
+                print(f"   📅 {project['write_date']}")
         
         # Print tasks
         if results.get('tasks'):
@@ -1262,13 +1262,13 @@ class OdooTextSearch(OdooBase):
                     if task.get('project_id'):
                         project_url = self.get_project_url(task['project_id'])
                         project_link = self.create_terminal_link(project_url, task['project_name'])
-                        print(f"   📂 Project: {project_link}")
+                        print(f"   📂 {project_link}")
                     else:
-                        print(f"   📂 Project: {task['project_name']}")
+                        print(f"   📂 {task['project_name']}")
                 if self.verbose or (task['user'] and task['user'] != 'Unassigned'):
-                    print(f"   👤 Assigned: {task['user']}")
+                    print(f"   👤 {task['user']}")
                 if self.verbose or (task['priority'] and task['priority'] != '0'):
-                    print(f"   🔥 Priority: {task['priority']}")
+                    print(f"   🔥 {task['priority']}")
                 
                 # Only show match indicators when verbose
                 if self.verbose:
@@ -1284,9 +1284,9 @@ class OdooTextSearch(OdooBase):
                     desc_snippet = markdown_desc[:200] + "..." if len(markdown_desc) > 200 else markdown_desc
                     # Replace newlines with spaces for compact display
                     desc_snippet = desc_snippet.replace('\n', ' ').strip()
-                    print(f"   📝 Description: {desc_snippet}")
+                    print(f"   📝 {desc_snippet}")
                 
-                print(f"   📅 Modified: {task['write_date']}")
+                print(f"   📅 {task['write_date']}")
         
         # Print messages
         if results.get('messages'):
@@ -1306,13 +1306,13 @@ class OdooTextSearch(OdooBase):
                     related_url = self.get_task_url(message['res_id'])
                     related_link = self.create_terminal_link(related_url, message['related_name'])
                 
-                print(f"   📎 Related: {related_link} ({message['related_type']})")
+                print(f"   📎 {related_link} ({message['related_type']})")
                 
                 # Only show non-empty fields or when verbose
                 if self.verbose or (message['author'] and message['author'] != 'System'):
-                    print(f"   👤 Author: {message['author']}")
+                    print(f"   👤 {message['author']}")
                 
-                print(f"   📅 Date: {message['date']}")
+                print(f"   📅 {message['date']}")
                 
                 # Show snippet of body
                 if message['body']:
@@ -1321,7 +1321,7 @@ class OdooTextSearch(OdooBase):
                     body_snippet = markdown_body[:200] + "..." if len(markdown_body) > 200 else markdown_body
                     # Replace newlines with spaces for compact display
                     body_snippet = body_snippet.replace('\n', ' ').strip()
-                    print(f"   💬 Message: {body_snippet}")
+                    print(f"   💬 {body_snippet}")
         
         # Print files
         if results.get('files'):
@@ -1334,9 +1334,9 @@ class OdooTextSearch(OdooBase):
                 
                 # Only show non-empty fields or when verbose
                 if self.verbose or (file['mimetype'] and file['mimetype'] != 'Unknown'):
-                    print(f"   📊 Type: {file['mimetype']}")
+                    print(f"   📊 {file['mimetype']}")
                 if self.verbose or file.get('file_size', 0) > 0:
-                    print(f"   📏 Size: {file['file_size_human']}")
+                    print(f"   📏 {file['file_size_human']}")
                 
                 # Create link for related record
                 if file.get('related_type') and file.get('related_name'):
@@ -1348,30 +1348,30 @@ class OdooTextSearch(OdooBase):
                         related_url = self.get_task_url(file['related_id'])
                         related_link = self.create_terminal_link(related_url, file['related_name'])
                     
-                    print(f"   📎 Attached to: {related_link} ({file['related_type']})")
+                    print(f"   📎 {related_link} ({file['related_type']})")
                 
                 if file.get('project_name') and file['related_type'] == 'Task':
                     project_link = file['project_name']
                     if file.get('project_id'):
                         project_url = self.get_project_url(file['project_id'])
                         project_link = self.create_terminal_link(project_url, file['project_name'])
-                    print(f"   📂 Project: {project_link}")
+                    print(f"   📂 {project_link}")
                 
                 # Only show assigned user if not empty/default and not verbose, or always if verbose
                 if file.get('assigned_user') and not str(file['assigned_user']).startswith('functools.partial'):
                     if self.verbose or (file['assigned_user'] != 'Unassigned'):
-                        print(f"   👤 Assigned: {file['assigned_user']}")
+                        print(f"   👤 {file['assigned_user']}")
                 
                 # Only show client if not empty and not verbose, or always if verbose
                 if file.get('client'):
                     if self.verbose or (file['client'] != 'No client'):
-                        print(f"   🏢 Client: {file['client']}")
+                        print(f"   🏢 {file['client']}")
                 
-                print(f"   📅 Created: {file['create_date']}")
+                print(f"   📅 {file['create_date']}")
                 
                 # Only show public status when verbose or when it's public
                 if self.verbose or file.get('public'):
-                    print(f"   🔗 Public: {'Yes' if file.get('public') else 'No'}")
+                    print(f"   🔗 {'Yes' if file.get('public') else 'No'}")
                 
                 if file.get('error'):
                     print(f"   ⚠️ Error: {file['error']}")
