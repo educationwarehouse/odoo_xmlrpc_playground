@@ -475,15 +475,40 @@ class OdooTextSearch(OdooBase):
                 # Add model-specific information
                 if file.res_model == 'project.project':
                     try:
-                        project = self.projects.browse(file.res_id)
-                        enriched_file.update({
-                            'related_type': 'Project',
-                            'related_name': project.name,
-                            'related_id': project.id,
-                            'project_name': project.name,
-                            'project_id': project.id,
-                            'client': project.partner_id.name if project.partner_id else 'No client'
-                        })
+                        # First search for the project record to ensure we get a proper record
+                        project_records = self.projects.search_records([('id', '=', file.res_id)])
+                        if project_records:
+                            project = project_records[0]
+                            
+                            # Safely get project attributes
+                            project_name = getattr(project, 'name', f'Project {file.res_id}')
+                            
+                            # Handle client relationship safely
+                            client_name = 'No client'
+                            if hasattr(project, 'partner_id') and project.partner_id:
+                                try:
+                                    if hasattr(project.partner_id, 'name'):
+                                        client_name = project.partner_id.name
+                                    else:
+                                        client_name = f'Client {project.partner_id}'
+                                except:
+                                    client_name = 'Client (unavailable)'
+                            
+                            enriched_file.update({
+                                'related_type': 'Project',
+                                'related_name': project_name,
+                                'related_id': project.id,
+                                'project_name': project_name,
+                                'project_id': project.id,
+                                'client': client_name
+                            })
+                        else:
+                            enriched_file.update({
+                                'related_type': 'Project',
+                                'related_name': f'Project {file.res_id}',
+                                'related_id': file.res_id,
+                                'error': 'Project record not found'
+                            })
                     except Exception as e:
                         enriched_file.update({
                             'related_type': 'Project',
@@ -494,17 +519,57 @@ class OdooTextSearch(OdooBase):
                 
                 elif file.res_model == 'project.task':
                     try:
-                        task = self.tasks.browse(file.res_id)
-                        enriched_file.update({
-                            'related_type': 'Task',
-                            'related_name': task.name,
-                            'related_id': task.id,
-                            'task_name': task.name,
-                            'task_id': task.id,
-                            'project_name': task.project_id.name if task.project_id else 'No project',
-                            'project_id': task.project_id.id if task.project_id else None,
-                            'assigned_user': task.user_id.name if task.user_id else 'Unassigned'
-                        })
+                        # First search for the task record to ensure we get a proper record
+                        task_records = self.tasks.search_records([('id', '=', file.res_id)])
+                        if task_records:
+                            task = task_records[0]
+                            
+                            # Safely get task attributes
+                            task_name = getattr(task, 'name', f'Task {file.res_id}')
+                            
+                            # Handle project relationship safely
+                            project_name = 'No project'
+                            project_id = None
+                            if hasattr(task, 'project_id') and task.project_id:
+                                try:
+                                    if hasattr(task.project_id, 'name'):
+                                        project_name = task.project_id.name
+                                        project_id = task.project_id.id
+                                    else:
+                                        # project_id might be just an ID
+                                        project_id = task.project_id
+                                        project_name = f'Project {project_id}'
+                                except:
+                                    project_name = 'Project (unavailable)'
+                            
+                            # Handle user relationship safely
+                            assigned_user = 'Unassigned'
+                            if hasattr(task, 'user_id') and task.user_id:
+                                try:
+                                    if hasattr(task.user_id, 'name'):
+                                        assigned_user = task.user_id.name
+                                    else:
+                                        assigned_user = f'User {task.user_id}'
+                                except:
+                                    assigned_user = 'User (unavailable)'
+                            
+                            enriched_file.update({
+                                'related_type': 'Task',
+                                'related_name': task_name,
+                                'related_id': task.id,
+                                'task_name': task_name,
+                                'task_id': task.id,
+                                'project_name': project_name,
+                                'project_id': project_id,
+                                'assigned_user': assigned_user
+                            })
+                        else:
+                            enriched_file.update({
+                                'related_type': 'Task',
+                                'related_name': f'Task {file.res_id}',
+                                'related_id': file.res_id,
+                                'error': 'Task record not found'
+                            })
                     except Exception as e:
                         enriched_file.update({
                             'related_type': 'Task',
