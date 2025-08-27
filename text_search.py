@@ -620,6 +620,16 @@ class OdooTextSearch(OdooBase):
                                             elif isinstance(user_field, int):
                                                 user_id = user_field
                                                 break
+                                            elif str(user_field).startswith('functools.partial'):
+                                                # Extract ID from partial object representation
+                                                partial_str = str(user_field)
+                                                import re
+                                                id_match = re.search(r'\[(\d+)\]', partial_str)
+                                                if id_match:
+                                                    user_id = int(id_match.group(1))
+                                                    if self.verbose:
+                                                        print(f"🔍 Extracted user ID {user_id} from partial object for file {file.id}")
+                                                    break
                                 except:
                                     continue
                             
@@ -710,6 +720,16 @@ class OdooTextSearch(OdooBase):
                                 elif isinstance(user_field, int):
                                     user_id = user_field
                                     break
+                                elif str(user_field).startswith('functools.partial'):
+                                    # Extract ID from partial object representation
+                                    partial_str = str(user_field)
+                                    import re
+                                    id_match = re.search(r'\[(\d+)\]', partial_str)
+                                    if id_match:
+                                        user_id = int(id_match.group(1))
+                                        if self.verbose:
+                                            print(f"🔍 Extracted user ID {user_id} from partial object for task {task.id}")
+                                        break
                     except:
                         continue
                 
