@@ -730,6 +730,7 @@ class OdooTextSearch(OdooBase):
                                     # Extract ID from partial object representation
                                     partial_str = str(user_field)
                                     import re
+                                    # Look for [number] pattern in the partial object string
                                     id_match = re.search(r'\[(\d+)\]', partial_str)
                                     if id_match:
                                         extracted_id = int(id_match.group(1))
@@ -742,6 +743,17 @@ class OdooTextSearch(OdooBase):
                                         if self.verbose:
                                             print(f"🔍 Extracted user ID {user_id} from partial object for task {task.id}")
                                         break
+                                    else:
+                                        # Try alternative patterns for partial objects
+                                        # Sometimes the ID might be in a different format
+                                        alt_match = re.search(r'(\d+)', partial_str)
+                                        if alt_match:
+                                            extracted_id = int(alt_match.group(1))
+                                            if extracted_id != task.id and extracted_id in self.user_cache:
+                                                user_id = extracted_id
+                                                if self.verbose:
+                                                    print(f"🔍 Extracted user ID {user_id} from partial object (alt pattern) for task {task.id}")
+                                                break
                     except:
                         continue
                 
