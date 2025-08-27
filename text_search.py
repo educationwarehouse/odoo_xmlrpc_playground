@@ -546,10 +546,21 @@ class OdooTextSearch(OdooBase):
                             assigned_user = 'Unassigned'
                             if hasattr(task, 'user_id') and task.user_id:
                                 try:
-                                    if hasattr(task.user_id, 'name'):
+                                    # Check if it's a partial object
+                                    if hasattr(task.user_id, 'name') and not str(task.user_id).startswith('functools.partial'):
                                         assigned_user = task.user_id.name
+                                    elif hasattr(task.user_id, 'id'):
+                                        # Try to get the user record properly
+                                        try:
+                                            user_records = self.client['res.users'].search_records([('id', '=', task.user_id.id)])
+                                            if user_records:
+                                                assigned_user = user_records[0].name
+                                            else:
+                                                assigned_user = f'User {task.user_id.id}'
+                                        except:
+                                            assigned_user = f'User {task.user_id.id}'
                                     else:
-                                        assigned_user = f'User {task.user_id}'
+                                        assigned_user = 'User (unavailable)'
                                 except:
                                     assigned_user = 'User (unavailable)'
                             
@@ -833,7 +844,7 @@ class OdooTextSearch(OdooBase):
                 if file.get('project_name') and file['related_type'] == 'Task':
                     print(f"   📂 Project: {file['project_name']}")
                 
-                if file.get('assigned_user'):
+                if file.get('assigned_user') and not str(file['assigned_user']).startswith('functools.partial'):
                     print(f"   👤 Assigned: {file['assigned_user']}")
                 
                 if file.get('client'):
