@@ -366,9 +366,9 @@ class OdooTextSearch(OdooBase):
             print(f"❌ Error searching files: {e}")
             return []
 
-    def full_text_search(self, search_term, since=None, search_type='all', include_descriptions=True, include_logs=True, include_files=False, file_types=None):
+    def full_text_search(self, search_term, since=None, search_type='all', include_descriptions=True, include_logs=True, include_files=True, file_types=None):
         """
-        Comprehensive text search across projects, tasks, logs, and optionally files
+        Comprehensive text search across projects, tasks, logs, and files
         
         Args:
             search_term: Text to search for
@@ -376,7 +376,7 @@ class OdooTextSearch(OdooBase):
             search_type: 'all', 'projects', 'tasks', 'logs', 'files'
             include_descriptions: Search in descriptions
             include_logs: Search in log messages (default: True)
-            include_files: Search in file names and metadata (default: False)
+            include_files: Search in file names and metadata (default: True)
             file_types: List of file extensions to filter by
         """
         if self.verbose:
@@ -1198,8 +1198,8 @@ Download files:
                        help='What to search in (default: all). Use "files" to search ALL attachments regardless of model.')
     parser.add_argument('--exclude-logs', action='store_true',
                        help='Exclude search in log messages (logs included by default)')
-    parser.add_argument('--include-files', action='store_true',
-                       help='Include search in file names and metadata')
+    parser.add_argument('--exclude-files', action='store_true',
+                       help='Exclude search in file names and metadata (files included by default)')
     parser.add_argument('--files-only', action='store_true',
                        help='Search only in files (equivalent to --type files)')
     parser.add_argument('--file-types', nargs='+', 
@@ -1222,7 +1222,7 @@ Download files:
     # Handle files-only flag
     if args.files_only:
         args.type = 'files'
-        args.include_files = True
+        args.exclude_files = False
     
     # Handle download request
     if args.download:
@@ -1257,7 +1257,7 @@ Download files:
             search_type=args.type,
             include_descriptions=not args.no_descriptions,
             include_logs=not args.exclude_logs,
-            include_files=args.include_files or args.type == 'files',
+            include_files=not args.exclude_files or args.type == 'files',
             file_types=args.file_types
         )
         
