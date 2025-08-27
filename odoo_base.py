@@ -86,7 +86,8 @@ class OdooBase:
             Formatted string with terminal hyperlink
         """
         # ANSI escape sequence for hyperlinks: \033]8;;URL\033\\TEXT\033]8;;\033\\
-        return f"\033]8;;{url}\033\\{text}\033]8;;\033\\"
+        # Use \x1b instead of \033 for better compatibility
+        return f"\x1b]8;;{url}\x1b\\{text}\x1b]8;;\x1b\\"
 
     def get_project_url(self, project_id):
         """Get the URL for a project"""
