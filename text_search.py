@@ -566,17 +566,37 @@ class OdooTextSearch(OdooBase):
                                     if hasattr(task.user_id, 'name') and task.user_id.name:
                                         assigned_user = task.user_id.name
                                     else:
-                                        # If it's just an ID, search for the user record
-                                        user_id = task.user_id.id if hasattr(task.user_id, 'id') else task.user_id
-                                        if self.verbose:
-                                            print(f"🔍 Looking up user ID {user_id} for file {file.id}")
-                                        
-                                        # Use search_records instead of browse for better error handling
-                                        user_records = self.client['res.users'].search_records([('id', '=', user_id)])
-                                        if user_records:
-                                            assigned_user = user_records[0].name
-                                        else:
-                                            assigned_user = f'User {user_id} (not found)'
+                                        # Get the actual user ID value from the partial object
+                                        try:
+                                            # For partial objects, we need to get the actual ID value
+                                            if hasattr(task.user_id, 'id'):
+                                                user_id = task.user_id.id
+                                            elif str(task.user_id).startswith('functools.partial'):
+                                                # Extract ID from partial object representation
+                                                partial_str = str(task.user_id)
+                                                import re
+                                                id_match = re.search(r'\[(\d+)\]', partial_str)
+                                                if id_match:
+                                                    user_id = int(id_match.group(1))
+                                                else:
+                                                    assigned_user = 'User (partial object error)'
+                                                    continue
+                                            else:
+                                                user_id = task.user_id
+                                            
+                                            if self.verbose:
+                                                print(f"🔍 Looking up user ID {user_id} for file {file.id}")
+                                            
+                                            # Use search_records instead of browse for better error handling
+                                            user_records = self.client['res.users'].search_records([('id', '=', user_id)])
+                                            if user_records:
+                                                assigned_user = user_records[0].name
+                                            else:
+                                                assigned_user = f'User {user_id} (not found)'
+                                        except Exception as user_error:
+                                            if self.verbose:
+                                                print(f"⚠️ Error extracting user ID: {user_error}")
+                                            assigned_user = 'User (ID extraction failed)'
                                 except Exception as e:
                                     if self.verbose:
                                         print(f"⚠️ Could not get user info for file {file.id}: {e}")
@@ -657,17 +677,37 @@ class OdooTextSearch(OdooBase):
                         if hasattr(task.user_id, 'name') and task.user_id.name:
                             user_name = task.user_id.name
                         else:
-                            # If it's just an ID, search for the user record
-                            user_id = task.user_id.id if hasattr(task.user_id, 'id') else task.user_id
-                            if self.verbose:
-                                print(f"🔍 Looking up user ID {user_id} for task {task.id}")
-                            
-                            # Use search_records instead of browse for better error handling
-                            user_records = self.client['res.users'].search_records([('id', '=', user_id)])
-                            if user_records:
-                                user_name = user_records[0].name
-                            else:
-                                user_name = f'User {user_id} (not found)'
+                            # Get the actual user ID value from the partial object
+                            try:
+                                # For partial objects, we need to get the actual ID value
+                                if hasattr(task.user_id, 'id'):
+                                    user_id = task.user_id.id
+                                elif str(task.user_id).startswith('functools.partial'):
+                                    # Extract ID from partial object representation
+                                    partial_str = str(task.user_id)
+                                    import re
+                                    id_match = re.search(r'\[(\d+)\]', partial_str)
+                                    if id_match:
+                                        user_id = int(id_match.group(1))
+                                    else:
+                                        user_name = 'User (partial object error)'
+                                        continue
+                                else:
+                                    user_id = task.user_id
+                                
+                                if self.verbose:
+                                    print(f"🔍 Looking up user ID {user_id} for task {task.id}")
+                                
+                                # Use search_records instead of browse for better error handling
+                                user_records = self.client['res.users'].search_records([('id', '=', user_id)])
+                                if user_records:
+                                    user_name = user_records[0].name
+                                else:
+                                    user_name = f'User {user_id} (not found)'
+                            except Exception as user_error:
+                                if self.verbose:
+                                    print(f"⚠️ Error extracting user ID: {user_error}")
+                                user_name = 'User (ID extraction failed)'
                     except Exception as e:
                         if self.verbose:
                             print(f"⚠️ Could not get user info for task {task.id}: {e}")
