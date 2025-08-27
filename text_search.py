@@ -562,22 +562,17 @@ class OdooTextSearch(OdooBase):
                             assigned_user = 'Unassigned'
                             if hasattr(task, 'user_id') and task.user_id:
                                 try:
-                                    # Check if it's a partial object
-                                    if hasattr(task.user_id, 'name') and not str(task.user_id).startswith('functools.partial'):
+                                    # Try direct access first
+                                    if hasattr(task.user_id, 'name'):
                                         assigned_user = task.user_id.name
-                                    elif hasattr(task.user_id, 'id'):
-                                        # Try to get the user record properly
-                                        try:
-                                            user_records = self.client['res.users'].search_records([('id', '=', task.user_id.id)])
-                                            if user_records:
-                                                assigned_user = user_records[0].name
-                                            else:
-                                                assigned_user = f'User {task.user_id.id}'
-                                        except:
-                                            assigned_user = f'User {task.user_id.id}'
                                     else:
-                                        assigned_user = 'User (unavailable)'
-                                except:
+                                        # If it's just an ID, browse the user record
+                                        user_id = task.user_id.id if hasattr(task.user_id, 'id') else task.user_id
+                                        user_record = self.client['res.users'].browse(user_id)
+                                        assigned_user = user_record.name
+                                except Exception as e:
+                                    if self.verbose:
+                                        print(f"⚠️ Could not get user info for file {file.id}: {e}")
                                     assigned_user = 'User (unavailable)'
                             
                             enriched_file.update({
@@ -651,8 +646,17 @@ class OdooTextSearch(OdooBase):
                 user_name = 'Unassigned'
                 if hasattr(task, 'user_id') and task.user_id:
                     try:
-                        user_name = task.user_id.name if hasattr(task.user_id, 'name') else f'User {task.user_id.id}'
-                    except:
+                        # Try direct access first
+                        if hasattr(task.user_id, 'name'):
+                            user_name = task.user_id.name
+                        else:
+                            # If it's just an ID, browse the user record
+                            user_id = task.user_id.id if hasattr(task.user_id, 'id') else task.user_id
+                            user_record = self.client['res.users'].browse(user_id)
+                            user_name = user_record.name
+                    except Exception as e:
+                        if self.verbose:
+                            print(f"⚠️ Could not get user info for task {task.id}: {e}")
                         user_name = 'User (unavailable)'
                 
                 enriched_task = {
