@@ -95,11 +95,11 @@ class OdooBase:
 
     def get_project_url(self, project_id):
         """Get the URL for a project"""
-        return f"{self.base_url}/odoo/all-projects/{project_id}"
+        return f"{self.base_url}/web#id={project_id}&model=project.project&view_type=form"
 
     def get_task_url(self, task_id):
         """Get the URL for a task"""
-        return f"{self.base_url}/odoo/all-tasks/{task_id}"
+        return f"{self.base_url}/web#id={task_id}&model=project.task&view_type=form"
 
     def get_message_url(self, message_id):
         """Get the URL for a message"""
