@@ -851,21 +851,55 @@ class OdooTextSearch(OdooBase):
             bool: True if successful, False otherwise
         """
         try:
-            attachment = self.attachments.browse(file_id)
+            # First get the attachment record with proper field access
+            attachment_records = self.attachments.search_records([('id', '=', file_id)])
             
-            if not hasattr(attachment, 'datas') or not attachment.datas:
-                print(f"❌ No data available for file {attachment.name}")
+            if not attachment_records:
+                print(f"❌ File with ID {file_id} not found")
                 return False
             
-            file_data = base64.b64decode(attachment.datas)
+            attachment = attachment_records[0]
+            
+            # Get the file name
+            file_name = getattr(attachment, 'name', f'file_{file_id}')
+            
+            # Check if we have data
+            if not hasattr(attachment, 'datas'):
+                print(f"❌ No data field available for file {file_name}")
+                return False
+            
+            # Get the data - handle both direct access and partial objects
+            try:
+                file_data_b64 = attachment.datas
+                if hasattr(file_data_b64, '__call__'):
+                    # It's a partial/callable, try to call it
+                    file_data_b64 = file_data_b64()
+                
+                if not file_data_b64:
+                    print(f"❌ No data available for file {file_name}")
+                    return False
+                
+                # Decode base64 data
+                file_data = base64.b64decode(file_data_b64)
+                
+            except Exception as data_error:
+                print(f"❌ Error accessing file data: {data_error}")
+                return False
+            
+            # Use original filename if no output_path directory specified
+            if output_path.endswith('/') or os.path.isdir(output_path):
+                output_path = os.path.join(output_path, file_name)
+            elif not os.path.basename(output_path):
+                output_path = os.path.join(output_path, file_name)
             
             # Create directory if needed
             os.makedirs(os.path.dirname(output_path), exist_ok=True)
             
+            # Write file
             with open(output_path, 'wb') as f:
                 f.write(file_data)
             
-            print(f"✅ Downloaded: {attachment.name}")
+            print(f"✅ Downloaded: {file_name}")
             print(f"   To: {output_path}")
             print(f"   Size: {len(file_data)} bytes")
             
@@ -873,6 +907,9 @@ class OdooTextSearch(OdooBase):
             
         except Exception as e:
             print(f"❌ Download failed: {e}")
+            import traceback
+            if self.verbose:
+                print(f"   Traceback: {traceback.format_exc()}")
             return False
 
     def get_file_statistics(self, files):
