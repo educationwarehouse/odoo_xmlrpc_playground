@@ -493,16 +493,6 @@ class OdooProjectFileSearchFinal(OdooBase):
             if bestand.get('fout'):
                 print(f"      ⚠️  Fout: {bestand['fout']}")
 
-    def _format_file_size(self, size_bytes):
-        """Formatteer bestandsgrootte"""
-        if not size_bytes:
-            return "0 B"
-
-        for unit in ['B', 'KB', 'MB', 'GB', 'TB']:
-            if size_bytes < 1024.0:
-                return f"{size_bytes:.1f} {unit}"
-            size_bytes /= 1024.0
-        return f"{size_bytes:.1f} PB"
 
 
 
