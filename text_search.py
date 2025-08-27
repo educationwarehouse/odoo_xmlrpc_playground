@@ -558,57 +558,42 @@ class OdooTextSearch(OdooBase):
                                 except:
                                     project_name = 'Project (unavailable)'
                             
-                            # Handle user relationship safely
+                            # Handle user relationship safely - check if field exists first
                             assigned_user = 'Unassigned'
-                            if hasattr(task, 'user_id') and task.user_id:
-                                try:
-                                    # Try direct access first
-                                    if hasattr(task.user_id, 'name') and task.user_id.name:
-                                        assigned_user = task.user_id.name
-                                    else:
-                                        # Get the actual user ID value from the partial object
+                            try:
+                                # Check if user_id field exists on this task model
+                                if hasattr(task, 'user_id'):
+                                    # Try to access the field value
+                                    user_field = getattr(task, 'user_id', None)
+                                    if user_field:
                                         try:
-                                            # For partial objects, we need to get the actual ID value
-                                            if hasattr(task.user_id, 'id'):
-                                                user_id = task.user_id.id
-                                            elif str(task.user_id).startswith('functools.partial'):
-                                                # Try to call the partial object to get the actual value
-                                                try:
-                                                    user_id = task.user_id()
-                                                    if self.verbose:
-                                                        print(f"🔍 Partial object resolved to user ID: {user_id}")
-                                                except Exception as partial_error:
-                                                    if self.verbose:
-                                                        print(f"⚠️ Could not resolve partial object: {partial_error}")
-                                                    # Fallback to regex extraction
-                                                    partial_str = str(task.user_id)
-                                                    import re
-                                                    id_match = re.search(r'\[(\d+)\]', partial_str)
-                                                    if id_match:
-                                                        user_id = int(id_match.group(1))
-                                                    else:
-                                                        assigned_user = 'User (partial object error)'
-                                                        continue
+                                            # Try direct name access first
+                                            if hasattr(user_field, 'name') and user_field.name:
+                                                assigned_user = user_field.name
+                                            elif hasattr(user_field, 'id'):
+                                                # Get user ID and look up the user record
+                                                user_id = user_field.id
+                                                if self.verbose:
+                                                    print(f"🔍 Looking up user ID {user_id} for file {file.id}")
+                                                user_records = self.client['res.users'].search_records([('id', '=', user_id)])
+                                                if user_records:
+                                                    assigned_user = user_records[0].name
+                                                else:
+                                                    assigned_user = f'User {user_id} (not found)'
                                             else:
-                                                user_id = task.user_id
-                                            
+                                                # Field exists but has no accessible value
+                                                assigned_user = 'User (field inaccessible)'
+                                        except Exception as field_error:
                                             if self.verbose:
-                                                print(f"🔍 Looking up user ID {user_id} for file {file.id}")
-                                            
-                                            # Use search_records instead of browse for better error handling
-                                            user_records = self.client['res.users'].search_records([('id', '=', user_id)])
-                                            if user_records:
-                                                assigned_user = user_records[0].name
-                                            else:
-                                                assigned_user = f'User {user_id} (not found)'
-                                        except Exception as user_error:
-                                            if self.verbose:
-                                                print(f"⚠️ Error extracting user ID: {user_error}")
-                                            assigned_user = 'User (ID extraction failed)'
-                                except Exception as e:
-                                    if self.verbose:
-                                        print(f"⚠️ Could not get user info for file {file.id}: {e}")
-                                    assigned_user = 'User (unavailable)'
+                                                print(f"⚠️ Error accessing user_id field for file {file.id}: {field_error}")
+                                            assigned_user = 'User (field access error)'
+                                else:
+                                    # user_id field doesn't exist on this model
+                                    assigned_user = 'User (field not available)'
+                            except Exception as e:
+                                if self.verbose:
+                                    print(f"⚠️ Could not get user info for file {file.id}: {e}")
+                                assigned_user = 'User (unavailable)'
                             
                             enriched_file.update({
                                 'related_type': 'Task',
@@ -677,57 +662,42 @@ class OdooTextSearch(OdooBase):
                     except:
                         project_name = 'Project (unavailable)'
                 
-                # Handle user relationship
+                # Handle user relationship - check if field exists first
                 user_name = 'Unassigned'
-                if hasattr(task, 'user_id') and task.user_id:
-                    try:
-                        # Try direct access first
-                        if hasattr(task.user_id, 'name') and task.user_id.name:
-                            user_name = task.user_id.name
-                        else:
-                            # Get the actual user ID value from the partial object
+                try:
+                    # Check if user_id field exists on this task model
+                    if hasattr(task, 'user_id'):
+                        # Try to access the field value
+                        user_field = getattr(task, 'user_id', None)
+                        if user_field:
                             try:
-                                # For partial objects, we need to get the actual ID value
-                                if hasattr(task.user_id, 'id'):
-                                    user_id = task.user_id.id
-                                elif str(task.user_id).startswith('functools.partial'):
-                                    # Try to call the partial object to get the actual value
-                                    try:
-                                        user_id = task.user_id()
-                                        if self.verbose:
-                                            print(f"🔍 Partial object resolved to user ID: {user_id}")
-                                    except Exception as partial_error:
-                                        if self.verbose:
-                                            print(f"⚠️ Could not resolve partial object: {partial_error}")
-                                        # Fallback to regex extraction
-                                        partial_str = str(task.user_id)
-                                        import re
-                                        id_match = re.search(r'\[(\d+)\]', partial_str)
-                                        if id_match:
-                                            user_id = int(id_match.group(1))
-                                        else:
-                                            user_name = 'User (partial object error)'
-                                            continue
+                                # Try direct name access first
+                                if hasattr(user_field, 'name') and user_field.name:
+                                    user_name = user_field.name
+                                elif hasattr(user_field, 'id'):
+                                    # Get user ID and look up the user record
+                                    user_id = user_field.id
+                                    if self.verbose:
+                                        print(f"🔍 Looking up user ID {user_id} for task {task.id}")
+                                    user_records = self.client['res.users'].search_records([('id', '=', user_id)])
+                                    if user_records:
+                                        user_name = user_records[0].name
+                                    else:
+                                        user_name = f'User {user_id} (not found)'
                                 else:
-                                    user_id = task.user_id
-                                
+                                    # Field exists but has no accessible value
+                                    user_name = 'User (field inaccessible)'
+                            except Exception as field_error:
                                 if self.verbose:
-                                    print(f"🔍 Looking up user ID {user_id} for task {task.id}")
-                                
-                                # Use search_records instead of browse for better error handling
-                                user_records = self.client['res.users'].search_records([('id', '=', user_id)])
-                                if user_records:
-                                    user_name = user_records[0].name
-                                else:
-                                    user_name = f'User {user_id} (not found)'
-                            except Exception as user_error:
-                                if self.verbose:
-                                    print(f"⚠️ Error extracting user ID: {user_error}")
-                                user_name = 'User (ID extraction failed)'
-                    except Exception as e:
-                        if self.verbose:
-                            print(f"⚠️ Could not get user info for task {task.id}: {e}")
-                        user_name = 'User (unavailable)'
+                                    print(f"⚠️ Error accessing user_id field for task {task.id}: {field_error}")
+                                user_name = 'User (field access error)'
+                    else:
+                        # user_id field doesn't exist on this model
+                        user_name = 'User (field not available)'
+                except Exception as e:
+                    if self.verbose:
+                        print(f"⚠️ Could not get user info for task {task.id}: {e}")
+                    user_name = 'User (unavailable)'
                 
                 enriched_task = {
                     'id': task.id,
