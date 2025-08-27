@@ -1185,7 +1185,7 @@ class OdooTextSearch(OdooBase):
         return enriched
 
     def print_results(self, results, limit=None):
-        """Print search results in a nice format"""
+        """Print search results in a tree-like hierarchical format"""
         total_found = len(results.get('projects', [])) + len(results.get('tasks', [])) + len(results.get('messages', [])) + len(results.get('files', []))
         
         if total_found == 0:
@@ -1207,174 +1207,351 @@ class OdooTextSearch(OdooBase):
         print(f"📁 Files: {len(results.get('files', []))}")
         print(f"📊 Total: {total_found}")
         
+        # Build hierarchical structure
+        hierarchy = self._build_hierarchy(results, limit)
+        
+        # Print hierarchical results
+        self._print_hierarchy(hierarchy)
+
+    def _build_hierarchy(self, results, limit=None):
+        """Build a hierarchical structure of results organized by projects"""
+        hierarchy = {
+            'projects': {},  # project_id -> project data + children
+            'orphaned_tasks': [],  # tasks without projects
+            'orphaned_messages': [],  # messages not linked to found projects/tasks
+            'orphaned_files': []  # files not linked to found projects/tasks
+        }
+        
         # Sort all results by date descending
         for result_type in ['projects', 'tasks', 'messages', 'files']:
             if results.get(result_type):
-                # Sort by write_date for projects/tasks, date for messages, create_date for files
                 date_field = 'date' if result_type == 'messages' else ('create_date' if result_type == 'files' else 'write_date')
                 results[result_type].sort(key=lambda x: x.get(date_field, ''), reverse=True)
         
-        # Print projects
-        if results.get('projects'):
-            print(f"\n📂 PROJECTS ({len(results['projects'])})")
-            print("-" * 40)
-            for i, project in enumerate(results['projects'][:limit] if limit else results['projects'], 1):
-                project_url = self.get_project_url(project['id'])
-                project_link = self.create_terminal_link(project_url, project['name'])
-                print(f"\n{i}. 📂 {project_link} (ID: {project['id']})")
-                
-                # Only show non-empty fields or when verbose
-                if self.verbose or (project['partner'] and project['partner'] != 'No client'):
-                    print(f"   🏢 {project['partner']}")
-                if self.verbose or (project['user'] and project['user'] != 'Unassigned'):
-                    print(f"   👤 {project['user']}")
-                
-                # Only show match indicators when verbose
-                if self.verbose:
-                    if project['match_in_name']:
-                        print(f"   ✅ Match in name")
-                    if project['match_in_description'] and project['description']:
-                        print(f"   ✅ Match in description")
-                
-                # Show description if there's a match or verbose
-                if project['match_in_description'] and project['description']:
-                    # Convert HTML to markdown and show snippet
-                    markdown_desc = self._html_to_markdown(project['description'])
-                    desc_snippet = markdown_desc[:200] + "..." if len(markdown_desc) > 200 else markdown_desc
-                    # Replace newlines with spaces for compact display
-                    desc_snippet = desc_snippet.replace('\n', ' ').strip()
-                    print(f"   📝 {desc_snippet}")
-                
-                print(f"   📅 {project['write_date']}")
+        # First, organize projects
+        for project in results.get('projects', []):
+            project_id = project['id']
+            hierarchy['projects'][project_id] = {
+                'project': project,
+                'tasks': [],
+                'messages': [],
+                'files': []
+            }
         
-        # Print tasks
-        if results.get('tasks'):
-            print(f"\n📋 TASKS ({len(results['tasks'])})")
-            print("-" * 40)
-            for i, task in enumerate(results['tasks'][:limit] if limit else results['tasks'], 1):
-                task_url = self.get_task_url(task['id'])
-                task_link = self.create_terminal_link(task_url, task['name'])
-                print(f"\n{i}. 📋 {task_link} (ID: {task['id']})")
-                
-                # Only show non-empty fields or when verbose
-                if self.verbose or (task['project_name'] and task['project_name'] != 'No project'):
-                    # Make project name a clickable link
-                    if task.get('project_id'):
-                        project_url = self.get_project_url(task['project_id'])
-                        project_link = self.create_terminal_link(project_url, task['project_name'])
-                        print(f"   📂 {project_link}")
-                    else:
-                        print(f"   📂 {task['project_name']}")
-                if self.verbose or (task['user'] and task['user'] != 'Unassigned'):
-                    print(f"   👤 {task['user']}")
-                if self.verbose or (task['priority'] and task['priority'] != '0'):
-                    print(f"   🔥 {task['priority']}")
-                
-                # Only show match indicators when verbose
-                if self.verbose:
-                    if task['match_in_name']:
-                        print(f"   ✅ Match in name")
-                    if task['match_in_description'] and task['description']:
-                        print(f"   ✅ Match in description")
-                
-                # Show description if there's a match or verbose
-                if task['match_in_description'] and task['description']:
-                    # Convert HTML to markdown and show snippet
-                    markdown_desc = self._html_to_markdown(task['description'])
-                    desc_snippet = markdown_desc[:200] + "..." if len(markdown_desc) > 200 else markdown_desc
-                    # Replace newlines with spaces for compact display
-                    desc_snippet = desc_snippet.replace('\n', ' ').strip()
-                    print(f"   📝 {desc_snippet}")
-                
-                print(f"   📅 {task['write_date']}")
+        # Organize tasks
+        for task in results.get('tasks', []):
+            project_id = task.get('project_id')
+            if project_id and project_id in hierarchy['projects']:
+                hierarchy['projects'][project_id]['tasks'].append(task)
+            else:
+                hierarchy['orphaned_tasks'].append(task)
         
-        # Print messages
-        if results.get('messages'):
-            print(f"\n💬 MESSAGES ({len(results['messages'])})")
-            print("-" * 40)
-            for i, message in enumerate(results['messages'][:limit] if limit else results['messages'], 1):
-                message_url = self.get_message_url(message['id'])
-                message_link = self.create_terminal_link(message_url, message['subject'])
-                print(f"\n{i}. 💬 {message_link} (ID: {message['id']})")
-                
-                # Create link for related record
-                related_link = message['related_name']
-                if message['related_type'] == 'project.project' and message['res_id']:
-                    related_url = self.get_project_url(message['res_id'])
-                    related_link = self.create_terminal_link(related_url, message['related_name'])
-                elif message['related_type'] == 'project.task' and message['res_id']:
-                    related_url = self.get_task_url(message['res_id'])
-                    related_link = self.create_terminal_link(related_url, message['related_name'])
-                
-                print(f"   📎 {related_link} ({message['related_type']})")
-                
-                # Only show non-empty fields or when verbose
-                if self.verbose or (message['author'] and message['author'] != 'System'):
-                    print(f"   👤 {message['author']}")
-                
-                print(f"   📅 {message['date']}")
-                
-                # Show snippet of body
-                if message['body']:
-                    # Convert HTML to markdown for better readability
-                    markdown_body = self._html_to_markdown(message['body'])
-                    body_snippet = markdown_body[:200] + "..." if len(markdown_body) > 200 else markdown_body
-                    # Replace newlines with spaces for compact display
-                    body_snippet = body_snippet.replace('\n', ' ').strip()
-                    print(f"   💬 {body_snippet}")
+        # Organize messages
+        for message in results.get('messages', []):
+            placed = False
+            
+            # Try to place under project
+            if message.get('related_type') == 'project.project' and message.get('res_id'):
+                project_id = message['res_id']
+                if project_id in hierarchy['projects']:
+                    hierarchy['projects'][project_id]['messages'].append(message)
+                    placed = True
+            
+            # Try to place under task's project
+            elif message.get('related_type') == 'project.task' and message.get('res_id'):
+                task_id = message['res_id']
+                # Find which project this task belongs to
+                for project_id, project_data in hierarchy['projects'].items():
+                    for task in project_data['tasks']:
+                        if task['id'] == task_id:
+                            hierarchy['projects'][project_id]['messages'].append(message)
+                            placed = True
+                            break
+                    if placed:
+                        break
+            
+            if not placed:
+                hierarchy['orphaned_messages'].append(message)
         
-        # Print files
-        if results.get('files'):
-            print(f"\n📁 FILES ({len(results['files'])})")
+        # Organize files
+        for file in results.get('files', []):
+            placed = False
+            
+            # Try to place under project
+            if file.get('related_type') == 'Project' and file.get('related_id'):
+                project_id = file['related_id']
+                if project_id in hierarchy['projects']:
+                    hierarchy['projects'][project_id]['files'].append(file)
+                    placed = True
+            
+            # Try to place under task's project
+            elif file.get('related_type') == 'Task' and file.get('related_id'):
+                task_id = file['related_id']
+                # Find which project this task belongs to
+                for project_id, project_data in hierarchy['projects'].items():
+                    for task in project_data['tasks']:
+                        if task['id'] == task_id:
+                            hierarchy['projects'][project_id]['files'].append(file)
+                            placed = True
+                            break
+                    if placed:
+                        break
+            
+            if not placed:
+                hierarchy['orphaned_files'].append(file)
+        
+        return hierarchy
+
+    def _print_hierarchy(self, hierarchy):
+        """Print the hierarchical results"""
+        project_count = 0
+        
+        # Print projects with their children
+        for project_id, project_data in hierarchy['projects'].items():
+            project_count += 1
+            project = project_data['project']
+            
+            print(f"\n📂 PROJECT: {self._format_project_header(project)}")
+            
+            # Print project details
+            self._print_project_details(project, indent="   ")
+            
+            # Print tasks under this project
+            if project_data['tasks']:
+                print(f"   ├── 📋 TASKS ({len(project_data['tasks'])})")
+                for i, task in enumerate(project_data['tasks']):
+                    is_last_task = i == len(project_data['tasks']) - 1
+                    prefix = "   └──" if is_last_task else "   ├──"
+                    self._print_task_item(task, prefix)
+            
+            # Print messages under this project
+            if project_data['messages']:
+                print(f"   ├── 💬 MESSAGES ({len(project_data['messages'])})")
+                for i, message in enumerate(project_data['messages']):
+                    is_last_msg = i == len(project_data['messages']) - 1
+                    prefix = "   └──" if is_last_msg else "   ├──"
+                    self._print_message_item(message, prefix)
+            
+            # Print files under this project
+            if project_data['files']:
+                print(f"   └── 📁 FILES ({len(project_data['files'])})")
+                for i, file in enumerate(project_data['files']):
+                    is_last_file = i == len(project_data['files']) - 1
+                    prefix = "      └──" if is_last_file else "      ├──"
+                    self._print_file_item(file, prefix)
+        
+        # Print orphaned items
+        if hierarchy['orphaned_tasks']:
+            print(f"\n📋 TASKS WITHOUT PROJECTS ({len(hierarchy['orphaned_tasks'])})")
             print("-" * 40)
-            for i, file in enumerate(results['files'][:limit] if limit else results['files'], 1):
-                file_url = self.get_file_url(file['id'])
-                file_link = self.create_terminal_link(file_url, file['name'])
-                print(f"\n{i}. 📄 {file_link} (ID: {file['id']})")
-                
-                # Only show non-empty fields or when verbose
-                if self.verbose or (file['mimetype'] and file['mimetype'] != 'Unknown'):
-                    print(f"   📊 {file['mimetype']}")
-                if self.verbose or file.get('file_size', 0) > 0:
-                    print(f"   📏 {file['file_size_human']}")
-                
-                # Create link for related record
-                if file.get('related_type') and file.get('related_name'):
-                    related_link = file['related_name']
-                    if file['related_type'] == 'Project' and file.get('related_id'):
-                        related_url = self.get_project_url(file['related_id'])
-                        related_link = self.create_terminal_link(related_url, file['related_name'])
-                    elif file['related_type'] == 'Task' and file.get('related_id'):
-                        related_url = self.get_task_url(file['related_id'])
-                        related_link = self.create_terminal_link(related_url, file['related_name'])
-                    
-                    print(f"   📎 {related_link} ({file['related_type']})")
-                
-                if file.get('project_name') and file['related_type'] == 'Task':
-                    project_link = file['project_name']
-                    if file.get('project_id'):
-                        project_url = self.get_project_url(file['project_id'])
-                        project_link = self.create_terminal_link(project_url, file['project_name'])
-                    print(f"   📂 {project_link}")
-                
-                # Only show assigned user if not empty/default and not verbose, or always if verbose
-                if file.get('assigned_user') and not str(file['assigned_user']).startswith('functools.partial'):
-                    if self.verbose or (file['assigned_user'] != 'Unassigned'):
-                        print(f"   👤 {file['assigned_user']}")
-                
-                # Only show client if not empty and not verbose, or always if verbose
-                if file.get('client'):
-                    if self.verbose or (file['client'] != 'No client'):
-                        print(f"   🏢 {file['client']}")
-                
-                print(f"   📅 {file['create_date']}")
-                
-                # Only show public status when verbose or when it's public
-                if self.verbose or file.get('public'):
-                    print(f"   🔗 {'Yes' if file.get('public') else 'No'}")
-                
-                if file.get('error'):
-                    print(f"   ⚠️ Error: {file['error']}")
+            for i, task in enumerate(hierarchy['orphaned_tasks'], 1):
+                self._print_task_standalone(task, i)
+        
+        if hierarchy['orphaned_messages']:
+            print(f"\n💬 STANDALONE MESSAGES ({len(hierarchy['orphaned_messages'])})")
+            print("-" * 40)
+            for i, message in enumerate(hierarchy['orphaned_messages'], 1):
+                self._print_message_standalone(message, i)
+        
+        if hierarchy['orphaned_files']:
+            print(f"\n📁 STANDALONE FILES ({len(hierarchy['orphaned_files'])})")
+            print("-" * 40)
+            for i, file in enumerate(hierarchy['orphaned_files'], 1):
+                self._print_file_standalone(file, i)
+
+    def _format_project_header(self, project):
+        """Format project header with link"""
+        project_url = self.get_project_url(project['id'])
+        project_link = self.create_terminal_link(project_url, project['name'])
+        return f"{project_link} (ID: {project['id']})"
+
+    def _print_project_details(self, project, indent=""):
+        """Print project details with proper indentation"""
+        # Only show non-empty fields or when verbose
+        if self.verbose or (project['partner'] and project['partner'] != 'No client'):
+            print(f"{indent}🏢 {project['partner']}")
+        if self.verbose or (project['user'] and project['user'] != 'Unassigned'):
+            print(f"{indent}👤 {project['user']}")
+        
+        # Only show match indicators when verbose
+        if self.verbose:
+            if project['match_in_name']:
+                print(f"{indent}✅ Match in name")
+            if project['match_in_description'] and project['description']:
+                print(f"{indent}✅ Match in description")
+        
+        # Show description if there's a match
+        if project['match_in_description'] and project['description']:
+            markdown_desc = self._html_to_markdown(project['description'])
+            desc_snippet = markdown_desc[:200] + "..." if len(markdown_desc) > 200 else markdown_desc
+            desc_snippet = desc_snippet.replace('\n', ' ').strip()
+            print(f"{indent}📝 {desc_snippet}")
+        
+        print(f"{indent}📅 {project['write_date']}")
+
+    def _print_task_item(self, task, prefix):
+        """Print a task item in the hierarchy"""
+        task_url = self.get_task_url(task['id'])
+        task_link = self.create_terminal_link(task_url, task['name'])
+        print(f"{prefix} {task_link} (ID: {task['id']})")
+        
+        # Show task details with deeper indentation
+        indent = "      "
+        if self.verbose or (task['user'] and task['user'] != 'Unassigned'):
+            print(f"{indent}👤 {task['user']}")
+        if self.verbose or (task['priority'] and task['priority'] != '0'):
+            print(f"{indent}🔥 {task['priority']}")
+        
+        if self.verbose:
+            if task['match_in_name']:
+                print(f"{indent}✅ Match in name")
+            if task['match_in_description'] and task['description']:
+                print(f"{indent}✅ Match in description")
+        
+        if task['match_in_description'] and task['description']:
+            markdown_desc = self._html_to_markdown(task['description'])
+            desc_snippet = markdown_desc[:200] + "..." if len(markdown_desc) > 200 else markdown_desc
+            desc_snippet = desc_snippet.replace('\n', ' ').strip()
+            print(f"{indent}📝 {desc_snippet}")
+        
+        print(f"{indent}📅 {task['write_date']}")
+
+    def _print_message_item(self, message, prefix):
+        """Print a message item in the hierarchy"""
+        message_url = self.get_message_url(message['id'])
+        message_link = self.create_terminal_link(message_url, message['subject'])
+        print(f"{prefix} {message_link} (ID: {message['id']})")
+        
+        # Show message details with deeper indentation
+        indent = "      "
+        if self.verbose or (message['author'] and message['author'] != 'System'):
+            print(f"{indent}👤 {message['author']}")
+        print(f"{indent}📅 {message['date']}")
+        
+        if message['body']:
+            markdown_body = self._html_to_markdown(message['body'])
+            body_snippet = markdown_body[:200] + "..." if len(markdown_body) > 200 else markdown_body
+            body_snippet = body_snippet.replace('\n', ' ').strip()
+            print(f"{indent}💬 {body_snippet}")
+
+    def _print_file_item(self, file, prefix):
+        """Print a file item in the hierarchy"""
+        file_url = self.get_file_url(file['id'])
+        file_link = self.create_terminal_link(file_url, file['name'])
+        print(f"{prefix} {file_link} (ID: {file['id']})")
+        
+        # Show file details with deeper indentation
+        indent = "         "
+        if self.verbose or (file['mimetype'] and file['mimetype'] != 'Unknown'):
+            print(f"{indent}📊 {file['mimetype']}")
+        if self.verbose or file.get('file_size', 0) > 0:
+            print(f"{indent}📏 {file['file_size_human']}")
+        print(f"{indent}📅 {file['create_date']}")
+
+    def _print_task_standalone(self, task, index):
+        """Print a standalone task (not under a project)"""
+        task_url = self.get_task_url(task['id'])
+        task_link = self.create_terminal_link(task_url, task['name'])
+        print(f"\n{index}. 📋 {task_link} (ID: {task['id']})")
+        
+        if self.verbose or (task['project_name'] and task['project_name'] != 'No project'):
+            if task.get('project_id'):
+                project_url = self.get_project_url(task['project_id'])
+                project_link = self.create_terminal_link(project_url, task['project_name'])
+                print(f"   📂 {project_link}")
+            else:
+                print(f"   📂 {task['project_name']}")
+        if self.verbose or (task['user'] and task['user'] != 'Unassigned'):
+            print(f"   👤 {task['user']}")
+        if self.verbose or (task['priority'] and task['priority'] != '0'):
+            print(f"   🔥 {task['priority']}")
+        
+        if self.verbose:
+            if task['match_in_name']:
+                print(f"   ✅ Match in name")
+            if task['match_in_description'] and task['description']:
+                print(f"   ✅ Match in description")
+        
+        if task['match_in_description'] and task['description']:
+            markdown_desc = self._html_to_markdown(task['description'])
+            desc_snippet = markdown_desc[:200] + "..." if len(markdown_desc) > 200 else markdown_desc
+            desc_snippet = desc_snippet.replace('\n', ' ').strip()
+            print(f"   📝 {desc_snippet}")
+        
+        print(f"   📅 {task['write_date']}")
+
+    def _print_message_standalone(self, message, index):
+        """Print a standalone message"""
+        message_url = self.get_message_url(message['id'])
+        message_link = self.create_terminal_link(message_url, message['subject'])
+        print(f"\n{index}. 💬 {message_link} (ID: {message['id']})")
+        
+        # Create link for related record
+        related_link = message['related_name']
+        if message['related_type'] == 'project.project' and message['res_id']:
+            related_url = self.get_project_url(message['res_id'])
+            related_link = self.create_terminal_link(related_url, message['related_name'])
+        elif message['related_type'] == 'project.task' and message['res_id']:
+            related_url = self.get_task_url(message['res_id'])
+            related_link = self.create_terminal_link(related_url, message['related_name'])
+        
+        print(f"   📎 {related_link} ({message['related_type']})")
+        
+        if self.verbose or (message['author'] and message['author'] != 'System'):
+            print(f"   👤 {message['author']}")
+        print(f"   📅 {message['date']}")
+        
+        if message['body']:
+            markdown_body = self._html_to_markdown(message['body'])
+            body_snippet = markdown_body[:200] + "..." if len(markdown_body) > 200 else markdown_body
+            body_snippet = body_snippet.replace('\n', ' ').strip()
+            print(f"   💬 {body_snippet}")
+
+    def _print_file_standalone(self, file, index):
+        """Print a standalone file"""
+        file_url = self.get_file_url(file['id'])
+        file_link = self.create_terminal_link(file_url, file['name'])
+        print(f"\n{index}. 📄 {file_link} (ID: {file['id']})")
+        
+        if self.verbose or (file['mimetype'] and file['mimetype'] != 'Unknown'):
+            print(f"   📊 {file['mimetype']}")
+        if self.verbose or file.get('file_size', 0) > 0:
+            print(f"   📏 {file['file_size_human']}")
+        
+        # Create link for related record
+        if file.get('related_type') and file.get('related_name'):
+            related_link = file['related_name']
+            if file['related_type'] == 'Project' and file.get('related_id'):
+                related_url = self.get_project_url(file['related_id'])
+                related_link = self.create_terminal_link(related_url, file['related_name'])
+            elif file['related_type'] == 'Task' and file.get('related_id'):
+                related_url = self.get_task_url(file['related_id'])
+                related_link = self.create_terminal_link(related_url, file['related_name'])
+            
+            print(f"   📎 {related_link} ({file['related_type']})")
+        
+        if file.get('project_name') and file['related_type'] == 'Task':
+            project_link = file['project_name']
+            if file.get('project_id'):
+                project_url = self.get_project_url(file['project_id'])
+                project_link = self.create_terminal_link(project_url, file['project_name'])
+            print(f"   📂 {project_link}")
+        
+        if file.get('assigned_user') and not str(file['assigned_user']).startswith('functools.partial'):
+            if self.verbose or (file['assigned_user'] != 'Unassigned'):
+                print(f"   👤 {file['assigned_user']}")
+        
+        if file.get('client'):
+            if self.verbose or (file['client'] != 'No client'):
+                print(f"   🏢 {file['client']}")
+        
+        print(f"   📅 {file['create_date']}")
+        
+        if self.verbose or file.get('public'):
+            print(f"   🔗 {'Yes' if file.get('public') else 'No'}")
+        
+        if file.get('error'):
+            print(f"   ⚠️ Error: {file['error']}")
 
     def _html_to_markdown(self, html_content):
         """
