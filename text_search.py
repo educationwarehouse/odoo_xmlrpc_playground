@@ -310,6 +310,8 @@ class OdooTextSearch:
             if search_type in ['all', 'projects']:
                 results['projects'] = self.search_projects(search_term, since_date, include_descriptions)
             
+            print()  # Add white line between searches
+            
             # Search tasks
             if search_type in ['all', 'tasks']:
                 results['tasks'] = self.search_tasks(search_term, since_date, include_descriptions)
@@ -359,26 +361,74 @@ class OdooTextSearch:
         
         for task in tasks:
             try:
+                # Handle functools.partial objects by browsing the record properly
+                if hasattr(task, 'id') and not hasattr(task, 'name'):
+                    # This is likely a partial object, browse it properly
+                    task = self.tasks.browse(task.id)
+                
+                # Safely get attributes with fallbacks
+                task_name = getattr(task, 'name', f'Task {task.id}')
+                task_description = getattr(task, 'description', '') or ''
+                
+                # Handle project relationship
+                project_name = 'No project'
+                project_id = None
+                if hasattr(task, 'project_id') and task.project_id:
+                    try:
+                        project_name = task.project_id.name if hasattr(task.project_id, 'name') else f'Project {task.project_id.id}'
+                        project_id = task.project_id.id if hasattr(task.project_id, 'id') else task.project_id
+                    except:
+                        project_name = 'Project (unavailable)'
+                
+                # Handle user relationship
+                user_name = 'Unassigned'
+                if hasattr(task, 'user_id') and task.user_id:
+                    try:
+                        user_name = task.user_id.name if hasattr(task.user_id, 'name') else f'User {task.user_id.id}'
+                    except:
+                        user_name = 'User (unavailable)'
+                
                 enriched_task = {
                     'id': task.id,
-                    'name': task.name,
-                    'description': getattr(task, 'description', '') or '',
-                    'project_name': task.project_id.name if task.project_id else 'No project',
-                    'project_id': task.project_id.id if task.project_id else None,
+                    'name': task_name,
+                    'description': task_description,
+                    'project_name': project_name,
+                    'project_id': project_id,
                     'stage': getattr(task, 'stage_id', None),
-                    'user': task.user_id.name if task.user_id else 'Unassigned',
+                    'user': user_name,
                     'priority': getattr(task, 'priority', '0'),
-                    'create_date': str(task.create_date) if task.create_date else '',
-                    'write_date': str(task.write_date) if task.write_date else '',
+                    'create_date': str(getattr(task, 'create_date', '')) if getattr(task, 'create_date', None) else '',
+                    'write_date': str(getattr(task, 'write_date', '')) if getattr(task, 'write_date', None) else '',
                     'type': 'task',
                     'search_term': search_term,
-                    'match_in_name': search_term.lower() in task.name.lower(),
-                    'match_in_description': search_term.lower() in (getattr(task, 'description', '') or '').lower()
+                    'match_in_name': search_term.lower() in task_name.lower(),
+                    'match_in_description': search_term.lower() in task_description.lower()
                 }
                 enriched.append(enriched_task)
                 
             except Exception as e:
-                print(f"⚠️ Error enriching task {task.id}: {e}")
+                print(f"⚠️ Error enriching task {getattr(task, 'id', 'unknown')}: {e}")
+                # Add minimal info even if enrichment fails
+                try:
+                    enriched.append({
+                        'id': getattr(task, 'id', 'unknown'),
+                        'name': f'Task {getattr(task, "id", "unknown")} (error)',
+                        'description': '',
+                        'project_name': 'Unknown',
+                        'project_id': None,
+                        'stage': None,
+                        'user': 'Unknown',
+                        'priority': '0',
+                        'create_date': '',
+                        'write_date': '',
+                        'type': 'task',
+                        'search_term': search_term,
+                        'match_in_name': False,
+                        'match_in_description': False,
+                        'error': str(e)
+                    })
+                except:
+                    pass
                 continue
         
         return enriched
