@@ -391,11 +391,8 @@ class OdooTextSearch(OdooBase):
             if self.verbose:
                 print(f"🔧 File domain: {final_domain}")
             
-            # Fetch files with minimal fields initially
-            files = self.attachments.search_records(final_domain, fields=[
-                'id', 'name', 'mimetype', 'file_size', 'create_date', 'write_date',
-                'public', 'res_model', 'res_id'
-            ])
+            # Fetch files
+            files = self.attachments.search_records(final_domain)
             
             if self.verbose:
                 print(f"📁 Found {len(files)} matching files")
@@ -417,8 +414,8 @@ class OdooTextSearch(OdooBase):
             print("👥 Building user cache...")
         
         try:
-            # Get all users with minimal fields
-            users = self.client['res.users'].search_records([], fields=['id', 'name'])
+            # Get all users
+            users = self.client['res.users'].search_records([])
             self.user_cache = {user.id: user.name for user in users}
             self._user_cache_built = True
             
@@ -439,11 +436,8 @@ class OdooTextSearch(OdooBase):
             print("📂 Building project cache...")
         
         try:
-            # Get all projects with essential fields only
-            projects = self.projects.search_records([], fields=[
-                'id', 'name', 'description', 'partner_id', 'user_id', 
-                'create_date', 'write_date', 'stage_id'
-            ])
+            # Get all projects
+            projects = self.projects.search_records([])
             
             for project in projects:
                 self.project_cache[project.id] = {
@@ -478,11 +472,8 @@ class OdooTextSearch(OdooBase):
             print("📋 Building task cache...")
         
         try:
-            # Get all tasks with essential fields only
-            tasks = self.tasks.search_records([], fields=[
-                'id', 'name', 'description', 'project_id', 'user_ids', 
-                'create_date', 'write_date', 'stage_id', 'priority'
-            ])
+            # Get all tasks
+            tasks = self.tasks.search_records([])
             
             for task in tasks:
                 # Extract user ID safely
@@ -544,10 +535,7 @@ class OdooTextSearch(OdooBase):
         
         # Fallback: direct lookup and cache
         try:
-            project_records = self.projects.search_records([('id', '=', project_id)], fields=[
-                'id', 'name', 'description', 'partner_id', 'user_id', 
-                'create_date', 'write_date', 'stage_id'
-            ])
+            project_records = self.projects.search_records([('id', '=', project_id)])
             if project_records:
                 project = project_records[0]
                 project_data = {
@@ -580,10 +568,7 @@ class OdooTextSearch(OdooBase):
         
         # Fallback: direct lookup and cache
         try:
-            task_records = self.tasks.search_records([('id', '=', task_id)], fields=[
-                'id', 'name', 'description', 'project_id', 'user_ids', 
-                'create_date', 'write_date', 'stage_id', 'priority'
-            ])
+            task_records = self.tasks.search_records([('id', '=', task_id)])
             if task_records:
                 task = task_records[0]
                 
