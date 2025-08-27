@@ -25,6 +25,7 @@ from datetime import datetime, timedelta
 import re
 import csv
 import html
+import base64
 from odoo_base import OdooBase
 
 
@@ -42,6 +43,9 @@ class OdooTextSearch(OdooBase):
     def __init__(self, verbose=False):
         """Initialize with .env configuration"""
         super().__init__(verbose=verbose)
+        
+        # Add attachments model for file search
+        self.attachments = self.client['ir.attachment']
 
     def _parse_time_reference(self, time_ref):
         """
@@ -248,16 +252,112 @@ class OdooTextSearch(OdooBase):
             print(f"❌ Error searching messages: {e}")
             return []
 
-    def full_text_search(self, search_term, since=None, search_type='all', include_descriptions=True, include_logs=True):
+    def search_files(self, search_term, since=None, file_types=None, model_type='both'):
         """
-        Comprehensive text search across projects, tasks, and optionally logs
+        Search in file names and metadata for projects and tasks
+        
+        Args:
+            search_term: Text to search for in filenames
+            since: Datetime to limit search from
+            file_types: List of file extensions to filter by (e.g., ['pdf', 'docx'])
+            model_type: 'projects', 'tasks', or 'both'
+        """
+        if self.verbose:
+            print(f"🔍 Searching files for: '{search_term}'")
+        
+        try:
+            # Get all project and task IDs first
+            all_projects = self.projects.search_records([])
+            all_tasks = self.tasks.search_records([])
+            
+            project_ids = [p.id for p in all_projects]
+            task_ids = [t.id for t in all_tasks]
+            
+            # Build domain for file search
+            domain = []
+            
+            # Time filter
+            if since:
+                domain.append(('create_date', '>=', since.strftime('%Y-%m-%d %H:%M:%S')))
+            
+            # Model filter - files attached to projects/tasks
+            model_conditions = []
+            if model_type in ['projects', 'both'] and project_ids:
+                model_conditions.append(['&', ('res_model', '=', 'project.project'), ('res_id', 'in', project_ids)])
+            if model_type in ['tasks', 'both'] and task_ids:
+                model_conditions.append(['&', ('res_model', '=', 'project.task'), ('res_id', 'in', task_ids)])
+            
+            if len(model_conditions) == 2:
+                model_domain = ['|'] + model_conditions[0] + model_conditions[1]
+            elif len(model_conditions) == 1:
+                model_domain = model_conditions[0]
+            else:
+                model_domain = []
+            
+            # Text search in filename
+            text_domain = [('name', 'ilike', search_term)]
+            
+            # File type filter
+            if file_types:
+                type_conditions = []
+                for file_type in file_types:
+                    # Handle both with and without dot
+                    ext = file_type.lower().lstrip('.')
+                    type_conditions.append(('name', 'ilike', f'.{ext}'))
+                
+                if len(type_conditions) > 1:
+                    type_domain = ['|'] * (len(type_conditions) - 1) + type_conditions
+                else:
+                    type_domain = type_conditions
+            else:
+                type_domain = []
+            
+            # Combine all domains
+            final_domain = []
+            if domain:
+                final_domain.extend(domain)
+            if model_domain:
+                if final_domain:
+                    final_domain = ['&'] + final_domain + model_domain
+                else:
+                    final_domain = model_domain
+            if text_domain:
+                if final_domain:
+                    final_domain = ['&'] + final_domain + text_domain
+                else:
+                    final_domain = text_domain
+            if type_domain:
+                if final_domain:
+                    final_domain = ['&'] + final_domain + type_domain
+                else:
+                    final_domain = type_domain
+            
+            if self.verbose:
+                print(f"🔧 File domain: {final_domain}")
+            
+            files = self.attachments.search_records(final_domain)
+            
+            if self.verbose:
+                print(f"📁 Found {len(files)} matching files")
+            
+            return self._enrich_files(files, search_term)
+            
+        except Exception as e:
+            print(f"❌ Error searching files: {e}")
+            return []
+
+    def full_text_search(self, search_term, since=None, search_type='all', include_descriptions=True, include_logs=True, include_files=False, file_types=None):
+        """
+        Comprehensive text search across projects, tasks, logs, and optionally files
         
         Args:
             search_term: Text to search for
             since: Time reference string (e.g., "1 week", "3 days")
-            search_type: 'all', 'projects', 'tasks', 'logs'
+            search_type: 'all', 'projects', 'tasks', 'logs', 'files'
             include_descriptions: Search in descriptions
             include_logs: Search in log messages (default: True)
+            include_files: Search in file names and metadata (default: False)
+            file_types: List of file extensions to filter by
         """
         if self.verbose:
             print(f"\n🚀 FULL TEXT SEARCH")
@@ -273,6 +373,9 @@ class OdooTextSearch(OdooBase):
             print(f"🎯 Type: {search_type}")
             print(f"📝 Include descriptions: {include_descriptions}")
             print(f"💬 Include logs: {include_logs}")
+            print(f"📁 Include files: {include_files}")
+            if file_types:
+                print(f"📄 File types: {', '.join(file_types)}")
             print()
         else:
             # Parse time reference
@@ -283,7 +386,8 @@ class OdooTextSearch(OdooBase):
         results = {
             'projects': [],
             'tasks': [],
-            'messages': []
+            'messages': [],
+            'files': []
         }
         
         try:
@@ -302,6 +406,11 @@ class OdooTextSearch(OdooBase):
             if include_logs and search_type in ['all', 'logs']:
                 model_type = 'both' if search_type == 'all' else search_type
                 results['messages'] = self.search_messages(search_term, since_date, model_type)
+            
+            # Search files
+            if include_files or search_type == 'files':
+                model_type = 'both' if search_type in ['all', 'files'] else search_type
+                results['files'] = self.search_files(search_term, since_date, file_types, model_type)
             
             return results
             
@@ -333,6 +442,76 @@ class OdooTextSearch(OdooBase):
                 
             except Exception as e:
                 print(f"⚠️ Error enriching project {project.id}: {e}")
+                continue
+        
+        return enriched
+
+    def _enrich_files(self, files, search_term):
+        """Enrich file results with additional info"""
+        enriched = []
+        
+        for file in files:
+            try:
+                enriched_file = {
+                    'id': file.id,
+                    'name': file.name,
+                    'mimetype': getattr(file, 'mimetype', '') or 'Unknown',
+                    'file_size': getattr(file, 'file_size', 0) or 0,
+                    'file_size_human': self.format_file_size(getattr(file, 'file_size', 0) or 0),
+                    'create_date': str(file.create_date) if file.create_date else '',
+                    'write_date': str(file.write_date) if file.write_date else '',
+                    'public': getattr(file, 'public', False),
+                    'res_model': file.res_model,
+                    'res_id': file.res_id,
+                    'type': 'file',
+                    'search_term': search_term
+                }
+                
+                # Add model-specific information
+                if file.res_model == 'project.project':
+                    try:
+                        project = self.projects.browse(file.res_id)
+                        enriched_file.update({
+                            'related_type': 'Project',
+                            'related_name': project.name,
+                            'related_id': project.id,
+                            'project_name': project.name,
+                            'project_id': project.id,
+                            'client': project.partner_id.name if project.partner_id else 'No client'
+                        })
+                    except Exception as e:
+                        enriched_file.update({
+                            'related_type': 'Project',
+                            'related_name': f'Project {file.res_id}',
+                            'related_id': file.res_id,
+                            'error': f'Project info not available: {e}'
+                        })
+                
+                elif file.res_model == 'project.task':
+                    try:
+                        task = self.tasks.browse(file.res_id)
+                        enriched_file.update({
+                            'related_type': 'Task',
+                            'related_name': task.name,
+                            'related_id': task.id,
+                            'task_name': task.name,
+                            'task_id': task.id,
+                            'project_name': task.project_id.name if task.project_id else 'No project',
+                            'project_id': task.project_id.id if task.project_id else None,
+                            'assigned_user': task.user_id.name if task.user_id else 'Unassigned'
+                        })
+                    except Exception as e:
+                        enriched_file.update({
+                            'related_type': 'Task',
+                            'related_name': f'Task {file.res_id}',
+                            'related_id': file.res_id,
+                            'error': f'Task info not available: {e}'
+                        })
+                
+                enriched.append(enriched_file)
+                
+            except Exception as e:
+                print(f"⚠️ Error enriching file {file.id}: {e}")
                 continue
         
         return enriched
@@ -462,7 +641,7 @@ class OdooTextSearch(OdooBase):
 
     def print_results(self, results, limit=None):
         """Print search results in a nice format"""
-        total_found = len(results.get('projects', [])) + len(results.get('tasks', [])) + len(results.get('messages', []))
+        total_found = len(results.get('projects', [])) + len(results.get('tasks', [])) + len(results.get('messages', [])) + len(results.get('files', []))
         
         if total_found == 0:
             print("📭 No results found.")
@@ -473,6 +652,7 @@ class OdooTextSearch(OdooBase):
         print(f"📂 Projects: {len(results.get('projects', []))}")
         print(f"📋 Tasks: {len(results.get('tasks', []))}")
         print(f"💬 Messages: {len(results.get('messages', []))}")
+        print(f"📁 Files: {len(results.get('files', []))}")
         print(f"📊 Total: {total_found}")
         
         # Print projects
@@ -549,6 +729,42 @@ class OdooTextSearch(OdooBase):
                     # Replace newlines with spaces for compact display
                     body_snippet = body_snippet.replace('\n', ' ').strip()
                     print(f"   💬 Message: {body_snippet}")
+        
+        # Print files
+        if results.get('files'):
+            print(f"\n📁 FILES ({len(results['files'])})")
+            print("-" * 40)
+            for i, file in enumerate(results['files'][:limit] if limit else results['files'], 1):
+                print(f"\n{i}. 📄 {file['name']} (ID: {file['id']})")
+                print(f"   📊 Type: {file['mimetype']}")
+                print(f"   📏 Size: {file['file_size_human']}")
+                
+                # Create link for related record
+                if file.get('related_type') and file.get('related_name'):
+                    related_link = file['related_name']
+                    if file['related_type'] == 'Project' and file.get('related_id'):
+                        related_url = self.get_project_url(file['related_id'])
+                        related_link = self.create_terminal_link(related_url, file['related_name'])
+                    elif file['related_type'] == 'Task' and file.get('related_id'):
+                        related_url = self.get_task_url(file['related_id'])
+                        related_link = self.create_terminal_link(related_url, file['related_name'])
+                    
+                    print(f"   📎 Attached to: {related_link} ({file['related_type']})")
+                
+                if file.get('project_name') and file['related_type'] == 'Task':
+                    print(f"   📂 Project: {file['project_name']}")
+                
+                if file.get('assigned_user'):
+                    print(f"   👤 Assigned: {file['assigned_user']}")
+                
+                if file.get('client'):
+                    print(f"   🏢 Client: {file['client']}")
+                
+                print(f"   📅 Created: {file['create_date']}")
+                print(f"   🔗 Public: {'Yes' if file.get('public') else 'No'}")
+                
+                if file.get('error'):
+                    print(f"   ⚠️ Error: {file['error']}")
 
     def _html_to_markdown(self, html_content):
         """
@@ -623,6 +839,134 @@ class OdooTextSearch(OdooBase):
         
         return text
 
+    def download_file(self, file_id, output_path):
+        """
+        Download a file to local disk
+        
+        Args:
+            file_id: ID of the attachment to download
+            output_path: Local path where to save the file
+            
+        Returns:
+            bool: True if successful, False otherwise
+        """
+        try:
+            attachment = self.attachments.browse(file_id)
+            
+            if not hasattr(attachment, 'datas') or not attachment.datas:
+                print(f"❌ No data available for file {attachment.name}")
+                return False
+            
+            file_data = base64.b64decode(attachment.datas)
+            
+            # Create directory if needed
+            os.makedirs(os.path.dirname(output_path), exist_ok=True)
+            
+            with open(output_path, 'wb') as f:
+                f.write(file_data)
+            
+            print(f"✅ Downloaded: {attachment.name}")
+            print(f"   To: {output_path}")
+            print(f"   Size: {len(file_data)} bytes")
+            
+            return True
+            
+        except Exception as e:
+            print(f"❌ Download failed: {e}")
+            return False
+
+    def get_file_statistics(self, files):
+        """
+        Generate statistics about files
+        
+        Args:
+            files: List of enriched file results
+            
+        Returns:
+            dict: Statistics about the files
+        """
+        if not files:
+            return {}
+        
+        stats = {
+            'total_files': len(files),
+            'total_size': 0,
+            'by_type': {},
+            'by_project': {},
+            'by_extension': {}
+        }
+        
+        for file in files:
+            # Total size
+            stats['total_size'] += file.get('file_size', 0)
+            
+            # By MIME type
+            mime_type = file.get('mimetype', 'Unknown')
+            if mime_type in stats['by_type']:
+                stats['by_type'][mime_type]['count'] += 1
+                stats['by_type'][mime_type]['size'] += file.get('file_size', 0)
+            else:
+                stats['by_type'][mime_type] = {
+                    'count': 1,
+                    'size': file.get('file_size', 0)
+                }
+            
+            # By project
+            project_name = file.get('project_name', 'No project')
+            if project_name in stats['by_project']:
+                stats['by_project'][project_name] += 1
+            else:
+                stats['by_project'][project_name] = 1
+            
+            # By file extension
+            filename = file.get('name', '')
+            if '.' in filename:
+                extension = filename.split('.')[-1].lower()
+                if extension in stats['by_extension']:
+                    stats['by_extension'][extension] += 1
+                else:
+                    stats['by_extension'][extension] = 1
+        
+        return stats
+
+    def print_file_statistics(self, files):
+        """Print file statistics in a nice format"""
+        stats = self.get_file_statistics(files)
+        
+        if not stats:
+            print("📊 No file statistics available")
+            return
+        
+        print(f"\n📊 FILE STATISTICS")
+        print(f"=" * 40)
+        print(f"📁 Total files: {stats['total_files']}")
+        print(f"💾 Total size: {self.format_file_size(stats['total_size'])}")
+        
+        # Top file types
+        if stats['by_type']:
+            print(f"\n📈 Top file types:")
+            sorted_types = sorted(stats['by_type'].items(), key=lambda x: x[1]['count'], reverse=True)
+            for i, (mime_type, type_stats) in enumerate(sorted_types[:5], 1):
+                percentage = (type_stats['count'] / stats['total_files']) * 100
+                size_human = self.format_file_size(type_stats['size'])
+                print(f"   {i}. {mime_type:<25} {type_stats['count']:3} files ({percentage:4.1f}%) - {size_human}")
+        
+        # Top projects
+        if stats['by_project']:
+            print(f"\n📂 Files by project:")
+            sorted_projects = sorted(stats['by_project'].items(), key=lambda x: x[1], reverse=True)
+            for i, (project_name, count) in enumerate(sorted_projects[:5], 1):
+                percentage = (count / stats['total_files']) * 100
+                print(f"   {i}. {project_name:<30} {count:3} files ({percentage:4.1f}%)")
+        
+        # Top extensions
+        if stats['by_extension']:
+            print(f"\n📄 Top file extensions:")
+            sorted_extensions = sorted(stats['by_extension'].items(), key=lambda x: x[1], reverse=True)
+            for i, (extension, count) in enumerate(sorted_extensions[:5], 1):
+                percentage = (count / stats['total_files']) * 100
+                print(f"   {i}. .{extension:<10} {count:3} files ({percentage:4.1f}%)")
+
     def export_results(self, results, filename='text_search_results.csv'):
         """Export search results to CSV"""
         all_results = []
@@ -634,6 +978,8 @@ class OdooTextSearch(OdooBase):
             all_results.append(task)
         for message in results.get('messages', []):
             all_results.append(message)
+        for file in results.get('files', []):
+            all_results.append(file)
         
         if not all_results:
             print("❌ No results to export")
@@ -671,25 +1017,63 @@ Examples:
   python text_search.py "client meeting" --since "3 days" --type projects
   python text_search.py "error" --since "2 weeks" --exclude-logs
   python text_search.py "urgent" --type tasks --no-descriptions
+  python text_search.py "report" --include-files --file-types pdf docx
+  python text_search.py "screenshot" --files-only --file-types png jpg
+  python text_search.py "document" --include-files --stats
   python text_search.py "zoekterm" --since "3 dagen"
   python text_search.py "vergadering" --since "2 weken" --type projects
+  
+Download files:
+  python text_search.py "report" --files-only --file-types pdf
+  python text_search.py --download 12345 --download-path ./my_files/
         """
     )
     
     parser.add_argument('search_term', help='Text to search for')
     parser.add_argument('--since', help='Time reference (e.g., "1 week", "3 days", "2 months")')
-    parser.add_argument('--type', choices=['all', 'projects', 'tasks', 'logs'], default='all',
+    parser.add_argument('--type', choices=['all', 'projects', 'tasks', 'logs', 'files'], default='all',
                        help='What to search in (default: all)')
     parser.add_argument('--exclude-logs', action='store_true',
                        help='Exclude search in log messages (logs included by default)')
+    parser.add_argument('--include-files', action='store_true',
+                       help='Include search in file names and metadata')
+    parser.add_argument('--files-only', action='store_true',
+                       help='Search only in files (equivalent to --type files)')
+    parser.add_argument('--file-types', nargs='+', 
+                       help='Filter by file types/extensions (e.g., pdf docx png)')
     parser.add_argument('--no-descriptions', action='store_true',
                        help='Do not search in descriptions, only names/subjects')
     parser.add_argument('--limit', type=int, help='Limit number of results to display')
     parser.add_argument('--export', help='Export results to CSV file')
+    parser.add_argument('--download', type=int, metavar='FILE_ID',
+                       help='Download file by ID (use with search results)')
+    parser.add_argument('--download-path', default='./downloads/',
+                       help='Directory to download files to (default: ./downloads/)')
+    parser.add_argument('--stats', action='store_true',
+                       help='Show file statistics (when files are included)')
     parser.add_argument('--verbose', '-v', action='store_true',
                        help='Show detailed search information and debug output')
     
     args = parser.parse_args()
+    
+    # Handle files-only flag
+    if args.files_only:
+        args.type = 'files'
+        args.include_files = True
+    
+    # Handle download request
+    if args.download:
+        try:
+            searcher = OdooTextSearch(verbose=args.verbose)
+            filename = f"file_{args.download}"
+            output_path = os.path.join(args.download_path, filename)
+            success = searcher.download_file(args.download, output_path)
+            if success:
+                print(f"✅ Download completed!")
+            return
+        except Exception as e:
+            print(f"❌ Download error: {e}")
+            return
     
     if not args.verbose:
         print("🔍 Searching...")
@@ -707,11 +1091,17 @@ Examples:
             since=args.since,
             search_type=args.type,
             include_descriptions=not args.no_descriptions,
-            include_logs=not args.exclude_logs
+            include_logs=not args.exclude_logs,
+            include_files=args.include_files or args.type == 'files',
+            file_types=args.file_types
         )
         
         # Print results
         searcher.print_results(results, limit=args.limit)
+        
+        # Show file statistics if requested and files are included
+        if args.stats and results.get('files'):
+            searcher.print_file_statistics(results['files'])
         
         # Export if requested
         if args.export:

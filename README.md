@@ -4,27 +4,43 @@ Dit is een experimenteer plek om toegang via XMLRPC te krijgen tot odoo en daar 
 
 ## Tools
 
-### `text_search.py` - Advanced Text Search
-Geavanceerde tekst zoekfunctionaliteit voor Odoo projecten en taken.
+### `text_search.py` - Unified Search Tool
+Geavanceerde zoekfunctionaliteit voor Odoo projecten, taken, logs EN bestanden.
 
 **Zoekt door:**
 - Project namen en beschrijvingen
 - Taak namen en beschrijvingen  
 - Project en taak log berichten (mail.message)
+- **NIEUW**: Bestandsnamen en metadata
 - Met tijd-gebaseerde filtering om server overbelasting te voorkomen
 
 **Gebruik:**
 ```bash
+# Tekst zoeken (zoals voorheen)
 python text_search.py "zoekterm" --since "1 week"
 python text_search.py "bug fix" --since "2 dagen" --type tasks
-python text_search.py "client meeting" --since "1 maand"
-python text_search.py "urgent" --type tasks --no-descriptions
-python text_search.py "error log" --exclude-logs
+
+# Bestanden zoeken (NIEUW!)
+python text_search.py "report" --include-files --file-types pdf docx
+python text_search.py "screenshot" --files-only --file-types png jpg
+python text_search.py "document" --include-files --stats
+
+# Bestanden downloaden (NIEUW!)
+python text_search.py --download 12345 --download-path ./my_files/
+
+# Gecombineerd zoeken
+python text_search.py "client meeting" --include-files --since "1 maand"
 ```
 
 **Opties:**
 - `--since`: Tijd referentie in Engels of Nederlands (bijv. "1 week", "3 days"/"3 dagen", "2 months"/"2 maanden")
-- `--type`: Wat te doorzoeken (all, projects, tasks, logs)
+- `--type`: Wat te doorzoeken (all, projects, tasks, logs, **files**)
+- `--include-files`: **NIEUW**: Zoek ook in bestandsnamen
+- `--files-only`: **NIEUW**: Zoek alleen in bestanden
+- `--file-types`: **NIEUW**: Filter op bestandstypes (pdf, docx, png, etc.)
+- `--download`: **NIEUW**: Download bestand op ID
+- `--download-path`: **NIEUW**: Download directory
+- `--stats`: **NIEUW**: Toon bestandsstatistieken
 - `--exclude-logs`: Sluit log berichten uit
 - `--no-descriptions`: Zoek alleen in namen, niet in beschrijvingen
 - `--limit`: Beperk aantal resultaten
