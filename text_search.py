@@ -616,9 +616,13 @@ class OdooTextSearch(OdooBase):
                                         if user_field:
                                             if hasattr(user_field, 'id'):
                                                 user_id = user_field.id
+                                                if self.verbose:
+                                                    print(f"🔍 Found user ID {user_id} via {field_name}.id for file {file.id}")
                                                 break
                                             elif isinstance(user_field, int):
                                                 user_id = user_field
+                                                if self.verbose:
+                                                    print(f"🔍 Found user ID {user_id} via {field_name} (int) for file {file.id}")
                                                 break
                                             elif str(user_field).startswith('functools.partial'):
                                                 # Extract ID from partial object representation
@@ -636,7 +640,20 @@ class OdooTextSearch(OdooBase):
                                                     if self.verbose:
                                                         print(f"🔍 Extracted user ID {user_id} from partial object for file {file.id}")
                                                     break
-                                except:
+                                                else:
+                                                    # Try alternative patterns for partial objects
+                                                    # Sometimes the ID might be in a different format
+                                                    alt_match = re.search(r'(\d+)', partial_str)
+                                                    if alt_match:
+                                                        extracted_id = int(alt_match.group(1))
+                                                        if extracted_id != task.id and extracted_id in self.user_cache:
+                                                            user_id = extracted_id
+                                                            if self.verbose:
+                                                                print(f"🔍 Extracted user ID {user_id} from partial object (alt pattern) for file {file.id}")
+                                                            break
+                                except Exception as field_error:
+                                    if self.verbose:
+                                        print(f"⚠️ Error accessing field {field_name}: {field_error}")
                                     continue
                             
                             # Use cached user lookup - ensure user_id is an integer
