@@ -41,7 +41,7 @@ python text_search.py "client meeting" --include-files --since "1 maand"
 - `--download`: **NIEUW**: Download bestand op ID
 - `--download-path`: **NIEUW**: Download directory
 - `--stats`: **NIEUW**: Toon bestandsstatistieken
-- `--exclude-logs`: Sluit log berichten uit
+- `--no-logs`: Sluit log berichten uit
 - `--no-descriptions`: Zoek alleen in namen, niet in beschrijvingen
 - `--limit`: Beperk aantal resultaten
 - `--export`: Exporteer naar CSV bestand
