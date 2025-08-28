@@ -301,10 +301,14 @@ class WebSearchHandler(BaseHTTPRequestHandler):
             with open('.env', 'w') as f:
                 f.writelines(env_lines)
             
+            # Reload environment variables
+            from dotenv import load_dotenv
+            load_dotenv(override=True)
+            
             # Reset searcher to use new settings
             WebSearchHandler._searcher = None
             
-            self.send_json_response({'success': True, 'message': 'Settings updated successfully'})
+            self.send_json_response({'success': True, 'message': 'Settings updated and server reloaded successfully'})
             
         except Exception as e:
             self.send_json_response({'error': str(e)}, 500)
