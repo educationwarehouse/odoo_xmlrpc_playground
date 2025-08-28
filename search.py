@@ -411,18 +411,21 @@ class OdooProjectFileSearchFinal(OdooBase):
             return
 
         try:
+            # Make data JSON-safe before CSV export
+            safe_bestanden = [self.make_json_safe(bestand) for bestand in bestanden]
+            
             with open(filename, 'w', newline='', encoding='utf-8') as csvfile:
                 # Bepaal velden uit eerste bestand
-                fieldnames = bestanden[0].keys()
+                fieldnames = safe_bestanden[0].keys()
                 writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
 
                 writer.writeheader()
-                for bestand in bestanden:
+                for bestand in safe_bestanden:
                     # Converteer alle waarden naar strings voor CSV
                     csv_row = {k: str(v) if v is not None else '' for k, v in bestand.items()}
                     writer.writerow(csv_row)
 
-            print(f"✅ {len(bestanden)} bestanden geëxporteerd naar {filename}")
+            print(f"✅ {len(safe_bestanden)} bestanden geëxporteerd naar {filename}")
 
         except Exception as e:
             print(f"❌ CSV export gefaald: {e}")
@@ -507,15 +510,18 @@ class OdooProjectFileSearchFinal(OdooBase):
             print("📭 Geen bestanden gevonden.")
             return
 
-        if limit and len(bestanden) > limit:
-            print(f"\n📁 Eerste {limit} van {len(bestanden)} bestanden:")
-            bestanden = bestanden[:limit]
+        # Make data JSON-safe before printing
+        safe_bestanden = [self.make_json_safe(bestand) for bestand in bestanden]
+
+        if limit and len(safe_bestanden) > limit:
+            print(f"\n📁 Eerste {limit} van {len(safe_bestanden)} bestanden:")
+            safe_bestanden = safe_bestanden[:limit]
         else:
-            print(f"\n📁 {len(bestanden)} bestand(en) gevonden:")
+            print(f"\n📁 {len(safe_bestanden)} bestand(en) gevonden:")
 
         print("=" * 90)
 
-        for i, bestand in enumerate(bestanden, 1):
+        for i, bestand in enumerate(safe_bestanden, 1):
             print(f"\n{i:2}. 📄 {bestand['naam']}")
             print(f"      🆔 ID: {bestand['id']}")
 
