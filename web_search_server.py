@@ -1740,6 +1740,8 @@ except Exception as e:
                             setTimeout(checkStatus, 1000);
                         } else if (data.status === 'completed') {
                             if (data.results && data.results.success) {
+                                console.log('Search completed, results:', data.results);
+                                
                                 // Cache the results
                                 cacheSearchResults(searchParams.q, searchParams, data.results.results);
                                 
@@ -1749,6 +1751,7 @@ except Exception as e:
                                 // Update search history to show cached status
                                 loadSearchHistory();
                             } else {
+                                console.error('Search failed:', data.results);
                                 document.getElementById('results').innerHTML = 
                                     `<div class="error">Search completed but failed: ${data.results?.error || 'Unknown error'}</div>`;
                             }
@@ -1813,6 +1816,13 @@ except Exception as e:
             const resultsContainer = document.getElementById('results');
             const results = data.results;
             const total = data.total;
+            
+            console.log('Displaying results:', results);
+            console.log('Total:', total);
+            console.log('Projects:', results.projects?.length || 0);
+            console.log('Tasks:', results.tasks?.length || 0);
+            console.log('Messages:', results.messages?.length || 0);
+            console.log('Files:', results.files?.length || 0);
             
             // Store current results globally for pin functionality
             window.currentSearchResults = results;
