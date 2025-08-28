@@ -274,9 +274,9 @@ try:
             try:
                 result = future.result()
                 results[category] = result
-                print(f"✅ {category.capitalize()} search completed: {{len(result)}} results")
+                print(f"✅ {{category.capitalize()}} search completed: {{len(result)}} results")
             except Exception as exc:
-                print(f"❌ {category.capitalize()} search failed: {{exc}}")
+                print(f"❌ {{category.capitalize()}} search failed: {{exc}}")
                 results[category] = []
     
     # Add URLs to results
