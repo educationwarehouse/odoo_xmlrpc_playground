@@ -290,33 +290,56 @@ try:
             print(f"ERROR in search_files: {{e}}")
             return []
     
-    # Execute searches in parallel using ThreadPoolExecutor
-    with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
-        # Submit all search tasks
-        futures = {{
-            "projects": executor.submit(search_projects),
-            "tasks": executor.submit(search_tasks),
-            "messages": executor.submit(search_messages),
-            "files": executor.submit(search_files)
-        }}
-        
-        # Wait for all futures to complete and collect results
-        print(f"DEBUG: Waiting for {{len(futures)}} search tasks to complete...")
-        for category, future in futures.items():
-            try:
-                print(f"DEBUG: Getting result for {{category}}...")
-                result = future.result()
-                results[category] = result
-                print(f"✅ {{category.capitalize()}} search completed: {{len(result)}} results")
-            except Exception as exc:
-                print(f"❌ {{category.capitalize()}} search failed: {{exc}}")
-                import traceback
-                print(f"   Traceback: {{traceback.format_exc()}}")
-                results[category] = []
-        
-        print(f"DEBUG: Final results summary:")
-        for category, items in results.items():
-            print(f"  {{category}}: {{len(items)}} items")
+    # Execute searches sequentially to avoid threading issues in subprocess
+    print(f"DEBUG: Starting sequential searches...")
+    
+    # Search projects
+    try:
+        print(f"DEBUG: Starting projects search...")
+        results["projects"] = search_projects()
+        print(f"✅ Projects search completed: {{len(results['projects'])}} results")
+    except Exception as exc:
+        print(f"❌ Projects search failed: {{exc}}")
+        import traceback
+        print(f"   Traceback: {{traceback.format_exc()}}")
+        results["projects"] = []
+    
+    # Search tasks
+    try:
+        print(f"DEBUG: Starting tasks search...")
+        results["tasks"] = search_tasks()
+        print(f"✅ Tasks search completed: {{len(results['tasks'])}} results")
+    except Exception as exc:
+        print(f"❌ Tasks search failed: {{exc}}")
+        import traceback
+        print(f"   Traceback: {{traceback.format_exc()}}")
+        results["tasks"] = []
+    
+    # Search messages
+    try:
+        print(f"DEBUG: Starting messages search...")
+        results["messages"] = search_messages()
+        print(f"✅ Messages search completed: {{len(results['messages'])}} results")
+    except Exception as exc:
+        print(f"❌ Messages search failed: {{exc}}")
+        import traceback
+        print(f"   Traceback: {{traceback.format_exc()}}")
+        results["messages"] = []
+    
+    # Search files
+    try:
+        print(f"DEBUG: Starting files search...")
+        results["files"] = search_files()
+        print(f"✅ Files search completed: {{len(results['files'])}} results")
+    except Exception as exc:
+        print(f"❌ Files search failed: {{exc}}")
+        import traceback
+        print(f"   Traceback: {{traceback.format_exc()}}")
+        results["files"] = []
+    
+    print(f"DEBUG: Final results summary:")
+    for category, items in results.items():
+        print(f"  {{category}}: {{len(items)}} items")
     
     # Add URLs to results
     for project in results.get("projects", []):
