@@ -1850,9 +1850,22 @@ class WebSearchHandler(BaseHTTPRequestHandler):
         }
         
         function scrollToResults() {
+            // First make sure we're on the search tab
+            const searchTab = document.getElementById('search-tab');
+            if (!searchTab.classList.contains('active')) {
+                switchTab('search');
+            }
+            
+            // Then scroll to results
             const resultsElement = document.getElementById('results');
-            if (resultsElement) {
+            if (resultsElement && resultsElement.innerHTML.trim() !== '') {
                 resultsElement.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            } else {
+                // If no results, just scroll to the form
+                const searchForm = document.querySelector('.search-form');
+                if (searchForm) {
+                    searchForm.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                }
             }
         }
         
