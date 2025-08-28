@@ -1268,7 +1268,7 @@ class WebSearchHandler(BaseHTTPRequestHandler):
 class WebSearchServer:
     """Web server for Odoo search interface"""
     
-    def __init__(self, host='localhost', port=8080):
+    def __init__(self, host='localhost', port=1900):
         self.host = host
         self.port = port
         self.server = None
@@ -1313,13 +1313,13 @@ def main():
         epilog="""
 Examples:
   python web_search_server.py
-  python web_search_server.py --port 8080 --host 0.0.0.0
+  python web_search_server.py --port 1900 --host 0.0.0.0
   python web_search_server.py --no-browser
         """
     )
     
     parser.add_argument('--host', default='localhost', help='Host to bind to (default: localhost)')
-    parser.add_argument('--port', type=int, default=8080, help='Port to bind to (default: 8080)')
+    parser.add_argument('--port', type=int, default=1900, help='Port to bind to (default: 1900)')
     parser.add_argument('--no-browser', action='store_true', help='Do not open browser automatically')
     
     args = parser.parse_args()
