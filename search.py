@@ -411,8 +411,20 @@ class OdooProjectFileSearchFinal(OdooBase):
             return
 
         try:
-            # Make data JSON-safe before CSV export
-            safe_bestanden = [self.make_json_safe(bestand) for bestand in bestanden]
+            # Convert data to strings for CSV export
+            safe_bestanden = []
+            for bestand in bestanden:
+                safe_bestand = {}
+                for k, v in bestand.items():
+                    if hasattr(v, '__class__') and 'odoo' in str(v.__class__).lower():
+                        # Handle Odoo objects
+                        if hasattr(v, 'id'):
+                            safe_bestand[k] = v.id
+                        else:
+                            safe_bestand[k] = str(v)
+                    else:
+                        safe_bestand[k] = v
+                safe_bestanden.append(safe_bestand)
             
             with open(filename, 'w', newline='', encoding='utf-8') as csvfile:
                 # Bepaal velden uit eerste bestand
@@ -510,8 +522,20 @@ class OdooProjectFileSearchFinal(OdooBase):
             print("📭 Geen bestanden gevonden.")
             return
 
-        # Make data JSON-safe before printing
-        safe_bestanden = [self.make_json_safe(bestand) for bestand in bestanden]
+        # Convert data for safe printing
+        safe_bestanden = []
+        for bestand in bestanden:
+            safe_bestand = {}
+            for k, v in bestand.items():
+                if hasattr(v, '__class__') and 'odoo' in str(v.__class__).lower():
+                    # Handle Odoo objects
+                    if hasattr(v, 'id'):
+                        safe_bestand[k] = v.id
+                    else:
+                        safe_bestand[k] = str(v)
+                else:
+                    safe_bestand[k] = v
+            safe_bestanden.append(safe_bestand)
 
         if limit and len(safe_bestanden) > limit:
             print(f"\n📁 Eerste {limit} van {len(safe_bestanden)} bestanden:")
