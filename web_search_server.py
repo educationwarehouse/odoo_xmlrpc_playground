@@ -1263,10 +1263,37 @@ class WebSearchHandler(BaseHTTPRequestHandler):
         }
         
         function refreshSearch() {
+            // Get current search parameters from the form
             const form = document.querySelector('.search-form');
+            const formData = new FormData(form);
+            const searchParams = {
+                q: formData.get('searchTerm'),
+                since: formData.get('since') || '',
+                type: formData.get('searchType'),
+                descriptions: formData.get('includeDescriptions') ? 'true' : 'false',
+                logs: formData.get('includeLogs') ? 'true' : 'false',
+                files: formData.get('includeFiles') ? 'true' : 'false',
+                file_types: formData.get('fileTypes') || '',
+                limit: formData.get('limit') || ''
+            };
+            
+            // Clear only this specific query's cache
+            const cacheKey = generateCacheKey(searchParams.q, searchParams);
+            const cachedResults = JSON.parse(localStorage.getItem('cachedSearchResults') || '{}');
+            
+            if (cachedResults[cacheKey]) {
+                delete cachedResults[cacheKey];
+                localStorage.setItem('cachedSearchResults', JSON.stringify(cachedResults));
+                console.log('Cleared cache for current search');
+            }
+            
+            // Update search history to remove cached indicator
+            loadSearchHistory();
+            
+            // Resubmit the search
             const event = new Event('submit', { cancelable: true });
             event.preventDefault = function() {}; // Add preventDefault method
-            performSearch(event, true); // Force refresh
+            performSearch(event, false); // Don't force refresh since we already cleared cache
         }
         
         function displayResults(data) {
