@@ -343,7 +343,7 @@ class OdooTextSearch(OdooBase):
 
     def search_messages(self, search_term, since=None, model_type='both', limit=None):
         """
-        Search in mail messages (logs) for projects and tasks
+        Search in mail messages (logs) for projects and tasks using cached data
         
         Args:
             search_term: Text to search for
@@ -357,87 +357,85 @@ class OdooTextSearch(OdooBase):
             print(f"🔍 Searching messages...", end="", flush=True)
         
         try:
-            # Build domain for message search
-            domain = []
+            # Ensure message cache is built
+            if not self._message_cache_built:
+                self._build_message_cache()
             
-            # Time filter
-            if since:
-                domain.append(('date', '>=', since.strftime('%Y-%m-%d %H:%M:%S')))
+            # Search through cached messages
+            matching_messages = []
+            search_term_lower = search_term.lower()
             
-            # Model filter
-            model_conditions = []
-            if model_type in ['projects', 'both']:
-                model_conditions.append(('model', '=', 'project.project'))
-            if model_type in ['tasks', 'both']:
-                model_conditions.append(('model', '=', 'project.task'))
+            for message_id, message_data in self.message_cache.items():
+                # Model filter
+                if model_type == 'projects' and message_data['model'] != 'project.project':
+                    continue
+                elif model_type == 'tasks' and message_data['model'] != 'project.task':
+                    continue
+                elif model_type == 'both' and message_data['model'] not in ['project.project', 'project.task']:
+                    continue
+                
+                # Time filter
+                if since:
+                    try:
+                        message_date = datetime.fromisoformat(message_data['date'].replace('Z', '+00:00'))
+                        if message_date < since:
+                            continue
+                    except:
+                        continue
+                
+                # Text search in message body and subject
+                body = message_data.get('body', '') or ''
+                subject = message_data.get('subject', '') or ''
+                
+                if (search_term_lower in body.lower() or 
+                    search_term_lower in subject.lower()):
+                    matching_messages.append(message_data)
             
-            if len(model_conditions) == 2:
-                model_domain = ['|'] + model_conditions
-            else:
-                model_domain = model_conditions
+            # Sort by date descending
+            matching_messages.sort(key=lambda x: x.get('date', ''), reverse=True)
             
-            # Text search in message body
-            text_domain = [('body', 'ilike', search_term)]
-            
-            # Combine all domains
-            if domain and model_domain:
-                final_domain = ['&'] + domain + ['&'] + model_domain + text_domain
-            elif domain:
-                final_domain = ['&'] + domain + text_domain
-            elif model_domain:
-                final_domain = ['&'] + model_domain + text_domain
-            else:
-                final_domain = text_domain
-            
-            if self.verbose:
-                print(f"🔧 Message domain: {final_domain}")
-            
-            # Apply limit at database level
-            search_kwargs = {}
+            # Apply limit
             if limit:
-                search_kwargs['limit'] = limit
-                search_kwargs['order'] = 'date desc'
-            
-            messages = self.messages.search_records(final_domain, **search_kwargs)
+                matching_messages = matching_messages[:limit]
             
             if self.verbose:
-                print(f"💬 Found {len(messages)} matching messages")
+                print(f"💬 Found {len(matching_messages)} matching messages")
             else:
-                print(f" {len(messages)} found", flush=True)
+                print(f" {len(matching_messages)} found", flush=True)
             
-            # Cache found messages and return enriched results
+            # Enrich messages with related record info
             enriched_messages = []
-            for message in messages:
+            for message_data in matching_messages:
                 # Get related record info with caching
                 related_name = "Unknown"
-                related_type = message.model
+                related_type = message_data['model']
                 
-                if message.model == 'project.project' and message.res_id:
-                    project_data = self._get_cached_project(message.res_id)
+                if message_data['model'] == 'project.project' and message_data['res_id']:
+                    project_data = self._get_cached_project(message_data['res_id'])
                     if project_data:
                         related_name = project_data['name']
                     else:
-                        related_name = f"Project {message.res_id}"
+                        related_name = f"Project {message_data['res_id']}"
                         
-                elif message.model == 'project.task' and message.res_id:
+                elif message_data['model'] == 'project.task' and message_data['res_id']:
                     # Don't use cached task data since tasks change frequently
                     try:
-                        task_records = self.tasks.search_records([('id', '=', message.res_id)])
+                        task_records = self.tasks.search_records([('id', '=', message_data['res_id'])])
                         if task_records:
                             related_name = task_records[0].name
                         else:
-                            related_name = f"Task {message.res_id}"
+                            related_name = f"Task {message_data['res_id']}"
                     except:
-                        related_name = f"Task {message.res_id}"
+                        related_name = f"Task {message_data['res_id']}"
                 
                 enriched_message = {
-                    'id': message.id,
-                    'subject': getattr(message, 'subject', '') or 'No subject',
-                    'body': getattr(message, 'body', '') or '',
-                    'author': message.author_id.name if message.author_id else 'System',
-                    'date': str(message.date) if message.date else '',
-                    'model': message.model,
-                    'res_id': message.res_id,
+                    'id': message_data['id'],
+                    'subject': message_data['subject'],
+                    'body': message_data['body'],
+                    'author': message_data['author'],
+                    'date': message_data['date'],
+                    'model': message_data['model'],
+                    'res_id': message_data['res_id'],
                     'related_name': related_name,
                     'related_type': related_type,
                     'type': 'message',
