@@ -630,6 +630,15 @@ class WebSearchHandler(BaseHTTPRequestHandler):
             background: var(--bg-color);
             border-radius: 6px;
             border: 1px solid var(--border-color);
+            text-decoration: none;
+            color: var(--text-color);
+            transition: all 0.3s;
+        }
+        
+        .stat-item:hover {
+            background: var(--accent-color);
+            color: white;
+            transform: translateY(-1px);
         }
         
         .result-section {
@@ -1087,37 +1096,37 @@ class WebSearchHandler(BaseHTTPRequestHandler):
                 <div class="results-summary">
                     <h2>Search Results (${total} total)</h2>
                     <div class="results-stats">
-                        <div class="stat-item">📂 Projects: ${results.projects?.length || 0}</div>
-                        <div class="stat-item">📋 Tasks: ${results.tasks?.length || 0}</div>
-                        <div class="stat-item">💬 Messages: ${results.messages?.length || 0}</div>
-                        <div class="stat-item">📁 Files: ${results.files?.length || 0}</div>
+                        <a href="#projects-section" class="stat-item">📂 Projects: ${results.projects?.length || 0}</a>
+                        <a href="#tasks-section" class="stat-item">📋 Tasks: ${results.tasks?.length || 0}</a>
+                        <a href="#messages-section" class="stat-item">💬 Messages: ${results.messages?.length || 0}</a>
+                        <a href="#files-section" class="stat-item">📁 Files: ${results.files?.length || 0}</a>
                     </div>
                 </div>
             `;
             
             // Display each section
             if (results.projects?.length > 0) {
-                html += renderSection('Projects', '📂', results.projects, 'project');
+                html += renderSection('Projects', '📂', results.projects, 'project', 'projects-section');
             }
             
             if (results.tasks?.length > 0) {
-                html += renderSection('Tasks', '📋', results.tasks, 'task');
+                html += renderSection('Tasks', '📋', results.tasks, 'task', 'tasks-section');
             }
             
             if (results.messages?.length > 0) {
-                html += renderSection('Messages', '💬', results.messages, 'message');
+                html += renderSection('Messages', '💬', results.messages, 'message', 'messages-section');
             }
             
             if (results.files?.length > 0) {
-                html += renderSection('Files', '📁', results.files, 'file');
+                html += renderSection('Files', '📁', results.files, 'file', 'files-section');
             }
             
             resultsContainer.innerHTML = html;
         }
         
-        function renderSection(title, icon, items, type) {
+        function renderSection(title, icon, items, type, sectionId) {
             let html = `
-                <div class="result-section">
+                <div class="result-section" id="${sectionId}">
                     <div class="section-header">
                         <span class="section-title">${icon} ${title} (${items.length})</span>
                     </div>
