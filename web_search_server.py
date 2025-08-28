@@ -108,7 +108,7 @@ class WebSearchHandler(BaseHTTPRequestHandler):
             
             # Create a new searcher instance for this request
             try:
-                searcher = OdooTextSearch(verbose=False)
+                searcher = OdooTextSearch(verbose=True)
 
             except Exception as e:
                 self.send_json_response({'error': f'Failed to connect to Odoo: {str(e)}'}, 500)
@@ -179,7 +179,7 @@ class WebSearchHandler(BaseHTTPRequestHandler):
             
             # Create a new searcher instance for this request
             try:
-                searcher = OdooTextSearch(verbose=False)
+                searcher = OdooTextSearch(verbose=True)
 
             except Exception as e:
                 self.send_json_response({'error': f'Failed to connect to Odoo: {str(e)}'}, 500)
