@@ -388,7 +388,7 @@ class WebSearchHandler(BaseHTTPRequestHandler):
     
     def get_main_html(self):
         """Generate the main HTML page"""
-        return """<!DOCTYPE html>
+        return r"""<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -1210,7 +1210,7 @@ class WebSearchHandler(BaseHTTPRequestHandler):
                     .replace(/&gt;/g, '>')
                     .replace(/&quot;/g, '"')
                     .replace(/&#39;/g, "'")
-                    .replace(/\n\s*\n\s*\n/g, '\n\n')
+                    .replace(/\\n\\s*\\n\\s*\\n/g, '\n\n')
                     .trim();
                 
                 const truncated = cleanDescription.length > 300 ? cleanDescription.substring(0, 300) + '...' : cleanDescription;
