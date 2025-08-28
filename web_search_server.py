@@ -134,10 +134,6 @@ class WebSearchHandler(BaseHTTPRequestHandler):
 
             # Calculate totals
             total_results = sum(len(json_safe_results.get(key, [])) for key in ['projects', 'tasks', 'messages', 'files'])
-
-            
-            # Calculate totals
-            total_results = sum(len(results.get(key, [])) for key in ['projects', 'tasks', 'messages', 'files'])
             
             response = {
                 'success': True,
@@ -155,8 +151,6 @@ class WebSearchHandler(BaseHTTPRequestHandler):
                 }
             }
 
-            self.send_json_response(response)
-            
             self.send_json_response(response)
             
         except Exception as e:
@@ -309,6 +303,42 @@ class WebSearchHandler(BaseHTTPRequestHandler):
         except Exception as e:
             self.send_json_response({'error': str(e)}, 500)
     
+    def make_results_json_safe(self, results):
+        """Convert all results to JSON-serializable format"""
+        def convert_value(value):
+            """Convert a single value to JSON-safe format"""
+            if value is None:
+                return None
+            elif hasattr(value, '__class__') and 'odoo' in str(value.__class__).lower():
+                # This is likely an Odoo Record object
+                if hasattr(value, 'id'):
+                    return value.id
+                else:
+                    return str(value)
+            elif isinstance(value, (str, int, float, bool)):
+                return value
+            elif isinstance(value, (list, tuple)):
+                return [convert_value(item) for item in value]
+            elif isinstance(value, dict):
+                return {k: convert_value(v) for k, v in value.items()}
+            else:
+                return str(value)
+        
+        json_safe_results = {}
+        for category, items in results.items():
+            if isinstance(items, list):
+                json_safe_results[category] = []
+                for item in items:
+                    if isinstance(item, dict):
+                        json_safe_item = {k: convert_value(v) for k, v in item.items()}
+                        json_safe_results[category].append(json_safe_item)
+                    else:
+                        json_safe_results[category].append(convert_value(item))
+            else:
+                json_safe_results[category] = convert_value(items)
+        
+        return json_safe_results
+
     def add_urls_to_results(self, results, searcher):
         """Add URLs to search results"""
         if not searcher:
