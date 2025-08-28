@@ -990,10 +990,10 @@ class WebSearchHandler(BaseHTTPRequestHandler):
                 .then(response => response.json())
                 .then(data => {
                     if (data.success) {
-                        document.getElementById('odooHost').value = data.settings.host;
-                        document.getElementById('odooDatabase').value = data.settings.database;
-                        document.getElementById('odooUser').value = data.settings.user;
-                        document.getElementById('odooPassword').value = '';
+                        document.getElementById('odooHost').value = data.settings.host || '';
+                        document.getElementById('odooDatabase').value = data.settings.database || '';
+                        document.getElementById('odooUser').value = data.settings.user || '';
+                        document.getElementById('odooPassword').placeholder = data.settings.password ? 'Password is set (leave empty to keep current)' : 'Enter password';
                     }
                 })
                 .catch(error => console.error('Error loading settings:', error));
@@ -1188,7 +1188,32 @@ class WebSearchHandler(BaseHTTPRequestHandler):
             // Description/Body
             const description = item.description || item.body;
             if (description && description.trim()) {
-                const truncated = description.length > 300 ? description.substring(0, 300) + '...' : description;
+                // Convert HTML to markdown-like text for better display
+                let cleanDescription = description
+                    .replace(/<br\s*\/?>/gi, '\n')
+                    .replace(/<\/p>/gi, '\n')
+                    .replace(/<p[^>]*>/gi, '')
+                    .replace(/<strong[^>]*>(.*?)<\/strong>/gi, '**$1**')
+                    .replace(/<b[^>]*>(.*?)<\/b>/gi, '**$1**')
+                    .replace(/<em[^>]*>(.*?)<\/em>/gi, '*$1*')
+                    .replace(/<i[^>]*>(.*?)<\/i>/gi, '*$1*')
+                    .replace(/<u[^>]*>(.*?)<\/u>/gi, '_$1_')
+                    .replace(/<code[^>]*>(.*?)<\/code>/gi, '`$1`')
+                    .replace(/<a[^>]*href=["']([^"']*)["'][^>]*>(.*?)<\/a>/gi, '[$2]($1)')
+                    .replace(/<li[^>]*>(.*?)<\/li>/gi, '- $1')
+                    .replace(/<ul[^>]*>|<\/ul>|<ol[^>]*>|<\/ol>/gi, '')
+                    .replace(/<div[^>]*>|<\/div>/gi, '\n')
+                    .replace(/<[^>]+>/g, '')
+                    .replace(/&nbsp;/g, ' ')
+                    .replace(/&amp;/g, '&')
+                    .replace(/&lt;/g, '<')
+                    .replace(/&gt;/g, '>')
+                    .replace(/&quot;/g, '"')
+                    .replace(/&#39;/g, "'")
+                    .replace(/\n\s*\n\s*\n/g, '\n\n')
+                    .trim();
+                
+                const truncated = cleanDescription.length > 300 ? cleanDescription.substring(0, 300) + '...' : cleanDescription;
                 html += `<div class="result-description">${escapeHtml(truncated)}</div>`;
             }
             

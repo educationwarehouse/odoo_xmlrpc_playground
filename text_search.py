@@ -408,7 +408,43 @@ class OdooTextSearch(OdooBase):
             else:
                 print(f" {len(messages)} found", flush=True)
             
-            return self._enrich_messages(messages, search_term)
+            # Cache found messages and return enriched results
+            enriched_messages = []
+            for message in messages:
+                # Get related record info with caching
+                related_name = "Unknown"
+                related_type = message.model
+                
+                if message.model == 'project.project' and message.res_id:
+                    project_data = self._get_cached_project(message.res_id)
+                    if project_data:
+                        related_name = project_data['name']
+                    else:
+                        related_name = f"Project {message.res_id}"
+                        
+                elif message.model == 'project.task' and message.res_id:
+                    task_data = self._get_cached_task(message.res_id)
+                    if task_data:
+                        related_name = task_data['name']
+                    else:
+                        related_name = f"Task {message.res_id}"
+                
+                enriched_message = {
+                    'id': message.id,
+                    'subject': getattr(message, 'subject', '') or 'No subject',
+                    'body': getattr(message, 'body', '') or '',
+                    'author': message.author_id.name if message.author_id else 'System',
+                    'date': str(message.date) if message.date else '',
+                    'model': message.model,
+                    'res_id': message.res_id,
+                    'related_name': related_name,
+                    'related_type': related_type,
+                    'type': 'message',
+                    'search_term': search_term
+                }
+                enriched_messages.append(enriched_message)
+            
+            return enriched_messages
             
         except Exception as e:
             print(f"❌ Error searching messages: {e}")
