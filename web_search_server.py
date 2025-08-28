@@ -261,16 +261,15 @@ try:
     # Execute searches in parallel using ThreadPoolExecutor
     with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
         # Submit all search tasks
-        future_to_category = {{
-            executor.submit(search_projects): "projects",
-            executor.submit(search_tasks): "tasks", 
-            executor.submit(search_messages): "messages",
-            executor.submit(search_files): "files"
+        futures = {{
+            "projects": executor.submit(search_projects),
+            "tasks": executor.submit(search_tasks),
+            "messages": executor.submit(search_messages),
+            "files": executor.submit(search_files)
         }}
         
-        # Collect results as they complete
-        for future in concurrent.futures.as_completed(future_to_category):
-            category = future_to_category[future]
+        # Wait for all futures to complete and collect results
+        for category, future in futures.items():
             try:
                 result = future.result()
                 results[category] = result
