@@ -27,21 +27,23 @@ import os
 import json
 import threading
 import webbrowser
+import subprocess
+import tempfile
+import uuid
 from datetime import datetime
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs, unquote
 import base64
 import mimetypes
-
-# Import our existing search functionality
-from text_search import OdooTextSearch
+import time
 
 
 class WebSearchHandler(BaseHTTPRequestHandler):
     """HTTP request handler for the web search interface"""
     
-    # Class-level searcher instance to persist across requests
-    _searcher = None
+    # Class-level storage for active searches
+    _active_searches = {}
+    _search_lock = threading.Lock()
     
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -55,6 +57,8 @@ class WebSearchHandler(BaseHTTPRequestHandler):
             self.serve_main_page()
         elif path == '/api/search':
             self.handle_search_api(parsed_path.query)
+        elif path == '/api/search/status':
+            self.handle_search_status_api(parsed_path.query)
         elif path == '/api/download':
             self.handle_download_api(parsed_path.query)
         elif path == '/api/settings':
@@ -84,7 +88,7 @@ class WebSearchHandler(BaseHTTPRequestHandler):
         self.wfile.write(html_content.encode('utf-8'))
     
     def handle_search_api(self, query_string):
-        """Handle search API requests"""
+        """Handle search API requests using background processes"""
         try:
             params = parse_qs(query_string)
             
@@ -102,57 +106,37 @@ class WebSearchHandler(BaseHTTPRequestHandler):
                 self.send_json_response({'error': 'Search term is required'}, 400)
                 return
 
+            # Generate unique search ID
+            search_id = str(uuid.uuid4())
+            
             # Log search request to console
-            print(f"🔍 Web search request: '{search_term}' (type: {search_type}, since: {since})")
+            print(f"🔍 Web search request [{search_id[:8]}]: '{search_term}' (type: {search_type}, since: {since})")
 
-            # Use class-level searcher instance to persist caches
-            try:
-                if WebSearchHandler._searcher is None:
-                    WebSearchHandler._searcher = OdooTextSearch(verbose=True)
-                searcher = WebSearchHandler._searcher
-
-            except Exception as e:
-                self.send_json_response({'error': f'Failed to connect to Odoo: {str(e)}'}, 500)
-                return
-            
-            # Perform search
-            results = searcher.full_text_search(
-                search_term=search_term,
-                since=since,
-                search_type=search_type,
-                include_descriptions=include_descriptions,
-                include_logs=include_logs,
-                include_files=include_files,
-                file_types=file_types,
-                limit=limit
+            # Start background search process
+            search_thread = threading.Thread(
+                target=self._execute_search_process,
+                args=(search_id, search_term, since, search_type, include_descriptions, 
+                      include_logs, include_files, file_types, limit)
             )
+            search_thread.daemon = True
+            search_thread.start()
             
-            # Add URLs to results using the searcher instance
-            self.add_urls_to_results(results, searcher)
-
-            # Make results JSON-safe
-            json_safe_results = self.make_results_json_safe(results)
-
-            # Calculate totals
-            total_results = sum(len(json_safe_results.get(key, [])) for key in ['projects', 'tasks', 'messages', 'files'])
-            
-            response = {
-                'success': True,
-                'results': json_safe_results,
-                'total': total_results,
-                'search_params': {
+            # Store search info
+            with WebSearchHandler._search_lock:
+                WebSearchHandler._active_searches[search_id] = {
+                    'status': 'running',
+                    'started_at': time.time(),
                     'search_term': search_term,
-                    'since': since,
-                    'type': search_type,
-                    'include_descriptions': include_descriptions,
-                    'include_logs': include_logs,
-                    'include_files': include_files,
-                    'file_types': file_types,
-                    'limit': limit
+                    'thread': search_thread
                 }
-            }
-
-            self.send_json_response(response)
+            
+            # Return search ID for polling
+            self.send_json_response({
+                'success': True,
+                'search_id': search_id,
+                'status': 'started',
+                'message': 'Search started in background'
+            })
             
         except Exception as e:
             import traceback
@@ -160,6 +144,243 @@ class WebSearchHandler(BaseHTTPRequestHandler):
             traceback_msg = traceback.format_exc()
 
             # Print to console
+            print(f"❌ {error_msg}")
+            print(f"   Traceback: {traceback_msg}")
+
+            self.send_json_response({
+                'error': error_msg,
+                'traceback': traceback_msg
+            }, 500)
+    
+    def _execute_search_process(self, search_id, search_term, since, search_type, 
+                               include_descriptions, include_logs, include_files, 
+                               file_types, limit):
+        """Execute search in a separate Python process"""
+        try:
+            # Create temporary files for communication
+            with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as input_file:
+                input_data = {
+                    'search_term': search_term,
+                    'since': since,
+                    'search_type': search_type,
+                    'include_descriptions': include_descriptions,
+                    'include_logs': include_logs,
+                    'include_files': include_files,
+                    'file_types': file_types,
+                    'limit': limit
+                }
+                json.dump(input_data, input_file)
+                input_file_path = input_file.name
+            
+            with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as output_file:
+                output_file_path = output_file.name
+            
+            # Execute search in separate process
+            cmd = [
+                'python', '-c', f'''
+import sys
+import json
+import os
+sys.path.insert(0, "{os.getcwd()}")
+from text_search import OdooTextSearch
+
+# Read input
+with open("{input_file_path}", "r") as f:
+    params = json.load(f)
+
+try:
+    # Create searcher instance
+    searcher = OdooTextSearch(verbose=True)
+    
+    # Perform search
+    results = searcher.full_text_search(
+        search_term=params["search_term"],
+        since=params["since"],
+        search_type=params["search_type"],
+        include_descriptions=params["include_descriptions"],
+        include_logs=params["include_logs"],
+        include_files=params["include_files"],
+        file_types=params["file_types"],
+        limit=params["limit"]
+    )
+    
+    # Add URLs to results
+    for project in results.get("projects", []):
+        project["url"] = searcher.get_project_url(project["id"])
+    
+    for task in results.get("tasks", []):
+        task["url"] = searcher.get_task_url(task["id"])
+        if task.get("project_id"):
+            task["project_url"] = searcher.get_project_url(task["project_id"])
+    
+    for message in results.get("messages", []):
+        message["url"] = searcher.get_message_url(message["id"])
+        if message.get("model") == "project.project" and message.get("res_id"):
+            message["related_url"] = searcher.get_project_url(message["res_id"])
+        elif message.get("model") == "project.task" and message.get("res_id"):
+            message["related_url"] = searcher.get_task_url(message["res_id"])
+    
+    for file in results.get("files", []):
+        file["url"] = searcher.get_file_url(file["id"])
+        file["download_url"] = f"/api/download?id={{file[\\"id\\"]}}"
+        if file.get("related_type") == "Project" and file.get("related_id"):
+            file["related_url"] = searcher.get_project_url(file["related_id"])
+        elif file.get("related_type") == "Task" and file.get("related_id"):
+            file["related_url"] = searcher.get_task_url(file["related_id"])
+            if file.get("project_id"):
+                file["project_url"] = searcher.get_project_url(file["project_id"])
+    
+    # Make results JSON-safe
+    def convert_value(value):
+        if value is None:
+            return None
+        elif hasattr(value, "__class__") and "odoo" in str(value.__class__).lower():
+            if hasattr(value, "id"):
+                return value.id
+            else:
+                return str(value)
+        elif isinstance(value, (str, int, float, bool)):
+            return value
+        elif isinstance(value, (list, tuple)):
+            return [convert_value(item) for item in value]
+        elif isinstance(value, dict):
+            return {{k: convert_value(v) for k, v in value.items()}}
+        else:
+            return str(value)
+    
+    json_safe_results = {{}}
+    for category, items in results.items():
+        if isinstance(items, list):
+            json_safe_results[category] = []
+            for item in items:
+                if isinstance(item, dict):
+                    json_safe_item = {{k: convert_value(v) for k, v in item.items()}}
+                    json_safe_results[category].append(json_safe_item)
+                else:
+                    json_safe_results[category].append(convert_value(item))
+        else:
+            json_safe_results[category] = convert_value(items)
+    
+    # Calculate totals
+    total_results = sum(len(json_safe_results.get(key, [])) for key in ["projects", "tasks", "messages", "files"])
+    
+    # Write results
+    output_data = {{
+        "success": True,
+        "results": json_safe_results,
+        "total": total_results,
+        "search_params": params
+    }}
+    
+    with open("{output_file_path}", "w") as f:
+        json.dump(output_data, f)
+
+except Exception as e:
+    import traceback
+    error_data = {{
+        "success": False,
+        "error": str(e),
+        "traceback": traceback.format_exc()
+    }}
+    
+    with open("{output_file_path}", "w") as f:
+        json.dump(error_data, f)
+'''
+            ]
+            
+            # Run the process
+            process = subprocess.run(cmd, capture_output=True, text=True, timeout=300)  # 5 minute timeout
+            
+            # Read results
+            try:
+                with open(output_file_path, 'r') as f:
+                    results = json.load(f)
+            except:
+                results = {
+                    'success': False,
+                    'error': 'Failed to read search results',
+                    'process_stdout': process.stdout,
+                    'process_stderr': process.stderr
+                }
+            
+            # Update search status
+            with WebSearchHandler._search_lock:
+                if search_id in WebSearchHandler._active_searches:
+                    WebSearchHandler._active_searches[search_id].update({
+                        'status': 'completed',
+                        'completed_at': time.time(),
+                        'results': results
+                    })
+            
+            # Cleanup temp files
+            try:
+                os.unlink(input_file_path)
+                os.unlink(output_file_path)
+            except:
+                pass
+                
+            print(f"✅ Search [{search_id[:8]}] completed: {results.get('total', 0)} results")
+            
+        except subprocess.TimeoutExpired:
+            with WebSearchHandler._search_lock:
+                if search_id in WebSearchHandler._active_searches:
+                    WebSearchHandler._active_searches[search_id].update({
+                        'status': 'timeout',
+                        'completed_at': time.time(),
+                        'results': {'success': False, 'error': 'Search timed out after 5 minutes'}
+                    })
+            print(f"⏰ Search [{search_id[:8]}] timed out")
+            
+        except Exception as e:
+            with WebSearchHandler._search_lock:
+                if search_id in WebSearchHandler._active_searches:
+                    WebSearchHandler._active_searches[search_id].update({
+                        'status': 'error',
+                        'completed_at': time.time(),
+                        'results': {'success': False, 'error': str(e)}
+                    })
+            print(f"❌ Search [{search_id[:8]}] failed: {e}")
+    
+    def handle_search_status_api(self, query_string):
+        """Handle search status polling requests"""
+        try:
+            params = parse_qs(query_string)
+            search_id = params.get('id', [''])[0]
+            
+            if not search_id:
+                self.send_json_response({'error': 'Search ID is required'}, 400)
+                return
+            
+            with WebSearchHandler._search_lock:
+                if search_id not in WebSearchHandler._active_searches:
+                    self.send_json_response({'error': 'Search not found'}, 404)
+                    return
+                
+                search_info = WebSearchHandler._active_searches[search_id]
+                
+                response = {
+                    'search_id': search_id,
+                    'status': search_info['status'],
+                    'search_term': search_info['search_term'],
+                    'started_at': search_info['started_at']
+                }
+                
+                if search_info['status'] in ['completed', 'error', 'timeout']:
+                    response['completed_at'] = search_info.get('completed_at')
+                    response['results'] = search_info.get('results', {})
+                    
+                    # Clean up completed searches after returning results
+                    if search_info['status'] == 'completed':
+                        # Keep for a short while in case of retry, then clean up in background
+                        threading.Timer(30.0, lambda: WebSearchHandler._active_searches.pop(search_id, None)).start()
+                
+                self.send_json_response(response)
+                
+        except Exception as e:
+            import traceback
+            error_msg = f"Status check error: {str(e)}"
+            traceback_msg = traceback.format_exc()
+
             print(f"❌ {error_msg}")
             print(f"   Traceback: {traceback_msg}")
 
@@ -178,12 +399,10 @@ class WebSearchHandler(BaseHTTPRequestHandler):
                 self.send_json_response({'error': 'File ID is required'}, 400)
                 return
             
-            # Use class-level searcher instance to persist caches
+            # Create temporary searcher for download (downloads are infrequent)
             try:
-                if WebSearchHandler._searcher is None:
-                    WebSearchHandler._searcher = OdooTextSearch(verbose=True)
-                searcher = WebSearchHandler._searcher
-
+                from text_search import OdooTextSearch
+                searcher = OdooTextSearch(verbose=False)
             except Exception as e:
                 self.send_json_response({'error': f'Failed to connect to Odoo: {str(e)}'}, 500)
                 return
@@ -302,8 +521,7 @@ class WebSearchHandler(BaseHTTPRequestHandler):
             from dotenv import load_dotenv
             load_dotenv(override=True)
             
-            # Reset searcher to use new settings
-            WebSearchHandler._searcher = None
+            # Note: No need to reset searcher since each search uses a new process
             
             self.send_json_response({'success': True, 'message': 'Settings updated and server reloaded successfully'})
             
@@ -346,39 +564,6 @@ class WebSearchHandler(BaseHTTPRequestHandler):
         
         return json_safe_results
 
-    def add_urls_to_results(self, results, searcher):
-        """Add URLs to search results"""
-        if not searcher:
-            return
-        
-        # Add URLs to projects
-        for project in results.get('projects', []):
-            project['url'] = searcher.get_project_url(project['id'])
-        
-        # Add URLs to tasks
-        for task in results.get('tasks', []):
-            task['url'] = searcher.get_task_url(task['id'])
-            if task.get('project_id'):
-                task['project_url'] = searcher.get_project_url(task['project_id'])
-        
-        # Add URLs to messages
-        for message in results.get('messages', []):
-            message['url'] = searcher.get_message_url(message['id'])
-            if message.get('model') == 'project.project' and message.get('res_id'):
-                message['related_url'] = searcher.get_project_url(message['res_id'])
-            elif message.get('model') == 'project.task' and message.get('res_id'):
-                message['related_url'] = searcher.get_task_url(message['res_id'])
-        
-        # Add URLs to files
-        for file in results.get('files', []):
-            file['url'] = searcher.get_file_url(file['id'])
-            file['download_url'] = f'/api/download?id={file["id"]}'
-            if file.get('related_type') == 'Project' and file.get('related_id'):
-                file['related_url'] = searcher.get_project_url(file['related_id'])
-            elif file.get('related_type') == 'Task' and file.get('related_id'):
-                file['related_url'] = searcher.get_task_url(file['related_id'])
-                if file.get('project_id'):
-                    file['project_url'] = searcher.get_project_url(file['project_id'])
     
     def send_json_response(self, data, status_code=200):
         """Send JSON response"""
@@ -609,6 +794,32 @@ class WebSearchHandler(BaseHTTPRequestHandler):
         
         @keyframes spin {
             to { transform: rotate(360deg); }
+        }
+        
+        .progress-dots {
+            display: inline-block;
+            margin-left: 10px;
+        }
+        
+        .progress-dots span {
+            animation: blink 1.4s infinite both;
+        }
+        
+        .progress-dots span:nth-child(2) {
+            animation-delay: 0.2s;
+        }
+        
+        .progress-dots span:nth-child(3) {
+            animation-delay: 0.4s;
+        }
+        
+        @keyframes blink {
+            0%, 80%, 100% {
+                opacity: 0;
+            }
+            40% {
+                opacity: 1;
+            }
         }
         
         .results {
@@ -1356,7 +1567,7 @@ class WebSearchHandler(BaseHTTPRequestHandler):
             });
         }
         
-        // Search functionality
+        // Search functionality with background processing
         function performSearch(event, forceRefresh = false) {
             event.preventDefault();
             
@@ -1395,25 +1606,19 @@ class WebSearchHandler(BaseHTTPRequestHandler):
             // Add to search history
             addToSearchHistory(searchParams.q);
             
-            // Show loading
-            document.getElementById('results').innerHTML = '<div class="loading">Searching...</div>';
+            // Show loading with progress
+            showSearchProgress('Starting search...');
             
-            // Perform search
+            // Start background search
             fetch('/api/search?' + params.toString())
                 .then(response => response.json())
                 .then(data => {
-                    if (data.success) {
-                        // Cache the results
-                        cacheSearchResults(searchParams.q, searchParams, data.results);
-                        
-                        // Display results
-                        displayResults(data);
-                        
-                        // Update search history to show cached status
-                        loadSearchHistory();
+                    if (data.success && data.search_id) {
+                        // Start polling for results
+                        pollSearchResults(data.search_id, searchParams);
                     } else {
                         document.getElementById('results').innerHTML = 
-                            `<div class="error">Error: ${data.error}</div>`;
+                            `<div class="error">Error: ${data.error || 'Failed to start search'}</div>`;
                     }
                 })
                 .catch(error => {
@@ -1421,6 +1626,66 @@ class WebSearchHandler(BaseHTTPRequestHandler):
                     document.getElementById('results').innerHTML = 
                         `<div class="error">Search failed: ${error.message}</div>`;
                 });
+        }
+        
+        function showSearchProgress(message) {
+            document.getElementById('results').innerHTML = `
+                <div class="loading">
+                    ${message}
+                    <div class="progress-dots">
+                        <span>.</span><span>.</span><span>.</span>
+                    </div>
+                </div>
+            `;
+        }
+        
+        function pollSearchResults(searchId, searchParams) {
+            const startTime = Date.now();
+            
+            function checkStatus() {
+                fetch(`/api/search/status?id=${searchId}`)
+                    .then(response => response.json())
+                    .then(data => {
+                        const elapsed = Math.round((Date.now() - startTime) / 1000);
+                        
+                        if (data.status === 'running') {
+                            showSearchProgress(`Searching... (${elapsed}s)`);
+                            // Continue polling
+                            setTimeout(checkStatus, 1000);
+                        } else if (data.status === 'completed') {
+                            if (data.results && data.results.success) {
+                                // Cache the results
+                                cacheSearchResults(searchParams.q, searchParams, data.results.results);
+                                
+                                // Display results
+                                displayResults(data.results);
+                                
+                                // Update search history to show cached status
+                                loadSearchHistory();
+                            } else {
+                                document.getElementById('results').innerHTML = 
+                                    `<div class="error">Search completed but failed: ${data.results?.error || 'Unknown error'}</div>`;
+                            }
+                        } else if (data.status === 'timeout') {
+                            document.getElementById('results').innerHTML = 
+                                `<div class="error">Search timed out after 5 minutes. Please try a more specific search.</div>`;
+                        } else if (data.status === 'error') {
+                            document.getElementById('results').innerHTML = 
+                                `<div class="error">Search failed: ${data.results?.error || 'Unknown error'}</div>`;
+                        } else {
+                            document.getElementById('results').innerHTML = 
+                                `<div class="error">Unknown search status: ${data.status}</div>`;
+                        }
+                    })
+                    .catch(error => {
+                        console.error('Status check error:', error);
+                        document.getElementById('results').innerHTML = 
+                            `<div class="error">Failed to check search status: ${error.message}</div>`;
+                    });
+            }
+            
+            // Start polling
+            checkStatus();
         }
         
         function refreshSearch() {
