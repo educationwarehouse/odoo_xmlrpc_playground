@@ -30,6 +30,7 @@ import webbrowser
 import subprocess
 import tempfile
 import uuid
+import sys
 from datetime import datetime
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs, unquote
@@ -177,7 +178,7 @@ class WebSearchHandler(BaseHTTPRequestHandler):
             
             # Execute search in separate process
             cmd = [
-                'python', '-c', f'''
+                sys.executable, '-c', f'''
 import sys
 import json
 import os
