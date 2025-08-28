@@ -40,8 +40,10 @@ from text_search import OdooTextSearch
 class WebSearchHandler(BaseHTTPRequestHandler):
     """HTTP request handler for the web search interface"""
     
+    # Class-level searcher instance to persist across requests
+    _searcher = None
+    
     def __init__(self, *args, **kwargs):
-        self.searcher = None
         super().__init__(*args, **kwargs)
     
     def do_GET(self):
@@ -106,9 +108,11 @@ class WebSearchHandler(BaseHTTPRequestHandler):
             # Create a new searcher instance for this request
 
             
-            # Create a new searcher instance for this request
+            # Use class-level searcher instance to persist caches
             try:
-                searcher = OdooTextSearch(verbose=True)
+                if WebSearchHandler._searcher is None:
+                    WebSearchHandler._searcher = OdooTextSearch(verbose=True)
+                searcher = WebSearchHandler._searcher
 
             except Exception as e:
                 self.send_json_response({'error': f'Failed to connect to Odoo: {str(e)}'}, 500)
@@ -177,9 +181,11 @@ class WebSearchHandler(BaseHTTPRequestHandler):
                 self.send_json_response({'error': 'File ID is required'}, 400)
                 return
             
-            # Create a new searcher instance for this request
+            # Use class-level searcher instance to persist caches
             try:
-                searcher = OdooTextSearch(verbose=True)
+                if WebSearchHandler._searcher is None:
+                    WebSearchHandler._searcher = OdooTextSearch(verbose=True)
+                searcher = WebSearchHandler._searcher
 
             except Exception as e:
                 self.send_json_response({'error': f'Failed to connect to Odoo: {str(e)}'}, 500)
@@ -296,7 +302,7 @@ class WebSearchHandler(BaseHTTPRequestHandler):
                 f.writelines(env_lines)
             
             # Reset searcher to use new settings
-            self.searcher = None
+            WebSearchHandler._searcher = None
             
             self.send_json_response({'success': True, 'message': 'Settings updated successfully'})
             

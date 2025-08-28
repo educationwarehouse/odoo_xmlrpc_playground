@@ -307,10 +307,7 @@ class OdooTextSearch(OdooBase):
                     'priority': getattr(task, 'priority', '0')
                 }
                 
-                # Cache this task for future lookups
-                self.task_cache[task.id] = task_data
-                
-                # Build project-task mapping
+                # Build project-task mapping (but don't cache task data since it changes frequently)
                 if task_data['project_id']:
                     if task_data['project_id'] not in self.project_task_map:
                         self.project_task_map[task_data['project_id']] = []
