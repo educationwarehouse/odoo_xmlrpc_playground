@@ -545,6 +545,118 @@ class OdooTextSearch(OdooBase):
             if self.verbose:
                 print(f"⚠️ Could not build user cache: {e}")
             self.user_cache = {}
+
+    def _build_project_cache(self):
+        """Build a cache of all projects for efficient lookup"""
+        if self._project_cache_built:
+            return
+            
+        if self.verbose:
+            print("📂 Building project cache...")
+        
+        try:
+            # Get all projects with limited fields for efficiency
+            projects = self.projects.search_records([])
+            
+            for project in projects:
+                project_data = {
+                    'id': project.id,
+                    'name': project.name,
+                    'description': getattr(project, 'description', '') or '',
+                    'partner_id': project.partner_id.id if project.partner_id else None,
+                    'partner_name': project.partner_id.name if project.partner_id else 'No client',
+                    'user_id': project.user_id.id if project.user_id else None,
+                    'user_name': project.user_id.name if project.user_id else 'Unassigned',
+                    'create_date': str(project.create_date) if project.create_date else '',
+                    'write_date': str(project.write_date) if project.write_date else '',
+                    'stage_id': getattr(project, 'stage_id', None)
+                }
+                self.project_cache[project.id] = project_data
+            
+            self._project_cache_built = True
+            
+            if self.verbose:
+                print(f"📂 Cached {len(self.project_cache)} projects")
+                
+        except Exception as e:
+            if self.verbose:
+                print(f"⚠️ Could not build project cache: {e}")
+            self.project_cache = {}
+
+    def _build_task_cache(self):
+        """Build a cache of all tasks for efficient lookup"""
+        if self._task_cache_built:
+            return
+            
+        if self.verbose:
+            print("📋 Building task cache...")
+        
+        try:
+            # Get all tasks with limited fields for efficiency
+            tasks = self.tasks.search_records([])
+            
+            for task in tasks:
+                # Extract user ID safely
+                user_id = None
+                user_name = 'Unassigned'
+                
+                if hasattr(task, 'user_ids') and task.user_ids:
+                    try:
+                        if hasattr(task.user_ids, '__len__') and len(task.user_ids) > 0:
+                            first_user = task.user_ids[0]
+                            if hasattr(first_user, 'id'):
+                                user_id = first_user.id
+                                user_name = first_user.name if hasattr(first_user, 'name') else f'User {user_id}'
+                    except:
+                        pass
+                
+                # Get stage/status information
+                stage_name = 'No stage'
+                stage_id = None
+                if hasattr(task, 'stage_id') and task.stage_id:
+                    try:
+                        if hasattr(task.stage_id, 'name'):
+                            stage_name = task.stage_id.name
+                            stage_id = task.stage_id.id if hasattr(task.stage_id, 'id') else task.stage_id
+                        else:
+                            stage_id = task.stage_id
+                            stage_name = f'Stage {stage_id}'
+                    except:
+                        stage_name = 'Stage (unavailable)'
+                
+                task_data = {
+                    'id': task.id,
+                    'name': task.name,
+                    'description': getattr(task, 'description', '') or '',
+                    'project_id': task.project_id.id if task.project_id else None,
+                    'project_name': task.project_id.name if task.project_id else 'No project',
+                    'user_id': user_id,
+                    'user_name': user_name,
+                    'create_date': str(task.create_date) if task.create_date else '',
+                    'write_date': str(task.write_date) if task.write_date else '',
+                    'stage_id': stage_id,
+                    'stage_name': stage_name,
+                    'priority': getattr(task, 'priority', '0')
+                }
+                self.task_cache[task.id] = task_data
+                
+                # Build project-task mapping
+                if task_data['project_id']:
+                    if task_data['project_id'] not in self.project_task_map:
+                        self.project_task_map[task_data['project_id']] = []
+                    if task.id not in self.project_task_map[task_data['project_id']]:
+                        self.project_task_map[task_data['project_id']].append(task.id)
+                    self.task_project_map[task.id] = task_data['project_id']
+            
+            self._task_cache_built = True
+            
+            if self.verbose:
+                print(f"📋 Cached {len(self.task_cache)} tasks")
+                
+        except Exception as e:
+            if self.verbose:
+                print(f"⚠️ Could not build task cache: {e}")
+            self.task_cache = {}
     
     
     def _get_cached_project(self, project_id):
