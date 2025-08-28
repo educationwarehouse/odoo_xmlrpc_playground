@@ -357,51 +357,73 @@ class OdooTextSearch(OdooBase):
             print(f"🔍 Searching messages...", end="", flush=True)
         
         try:
-            # Ensure message cache is built
+            # Ensure message cache is initialized
             if not self._message_cache_built:
                 self._build_message_cache()
             
-            # Search through cached messages
-            matching_messages = []
-            search_term_lower = search_term.lower()
+            # Build domain for message search
+            domain = []
             
-            for message_id, message_data in self.message_cache.items():
-                # Model filter
-                if model_type == 'projects' and message_data['model'] != 'project.project':
-                    continue
-                elif model_type == 'tasks' and message_data['model'] != 'project.task':
-                    continue
-                elif model_type == 'both' and message_data['model'] not in ['project.project', 'project.task']:
-                    continue
-                
-                # Time filter
-                if since:
-                    try:
-                        message_date = datetime.fromisoformat(message_data['date'].replace('Z', '+00:00'))
-                        if message_date < since:
-                            continue
-                    except:
-                        continue
-                
-                # Text search in message body and subject
-                body = message_data.get('body', '') or ''
-                subject = message_data.get('subject', '') or ''
-                
-                if (search_term_lower in body.lower() or 
-                    search_term_lower in subject.lower()):
-                    matching_messages.append(message_data)
+            # Time filter
+            if since:
+                domain.append(('date', '>=', since.strftime('%Y-%m-%d %H:%M:%S')))
             
-            # Sort by date descending
-            matching_messages.sort(key=lambda x: x.get('date', ''), reverse=True)
+            # Model filter
+            model_conditions = []
+            if model_type in ['projects', 'both']:
+                model_conditions.append(('model', '=', 'project.project'))
+            if model_type in ['tasks', 'both']:
+                model_conditions.append(('model', '=', 'project.task'))
             
-            # Apply limit
-            if limit:
-                matching_messages = matching_messages[:limit]
+            if len(model_conditions) == 2:
+                model_domain = ['|'] + model_conditions
+            else:
+                model_domain = model_conditions
+            
+            # Text search in message body
+            text_domain = [('body', 'ilike', search_term)]
+            
+            # Combine all domains
+            if domain and model_domain:
+                final_domain = ['&'] + domain + ['&'] + model_domain + text_domain
+            elif domain:
+                final_domain = ['&'] + domain + text_domain
+            elif model_domain:
+                final_domain = ['&'] + model_domain + text_domain
+            else:
+                final_domain = text_domain
             
             if self.verbose:
-                print(f"💬 Found {len(matching_messages)} matching messages")
+                print(f"🔧 Message domain: {final_domain}")
+            
+            # Apply limit at database level
+            search_kwargs = {}
+            if limit:
+                search_kwargs['limit'] = limit
+                search_kwargs['order'] = 'date desc'
+            
+            messages = self.messages.search_records(final_domain, **search_kwargs)
+            
+            if self.verbose:
+                print(f"💬 Found {len(messages)} matching messages")
             else:
-                print(f" {len(matching_messages)} found", flush=True)
+                print(f" {len(messages)} found", flush=True)
+            
+            # Cache found messages for future use
+            matching_messages = []
+            for message in messages:
+                message_data = {
+                    'id': message.id,
+                    'subject': getattr(message, 'subject', '') or 'No subject',
+                    'body': getattr(message, 'body', '') or '',
+                    'author': message.author_id.name if message.author_id else 'System',
+                    'date': str(message.date) if message.date else '',
+                    'model': message.model,
+                    'res_id': message.res_id
+                }
+                # Cache this message for future searches
+                self.message_cache[message.id] = message_data
+                matching_messages.append(message_data)
             
             # Enrich messages with related record info
             enriched_messages = []
@@ -633,39 +655,19 @@ class OdooTextSearch(OdooBase):
             self.project_cache = {}
 
     def _build_message_cache(self):
-        """Build a cache of all messages for efficient lookup"""
+        """Initialize empty message cache - messages will be cached on-demand during searches"""
         if self._message_cache_built:
             return
             
         if self.verbose:
-            print("💬 Building message cache...")
+            print("💬 Initializing message cache (on-demand)...")
         
-        try:
-            # Get all messages for projects and tasks
-            domain = ['|', ('model', '=', 'project.project'), ('model', '=', 'project.task')]
-            messages = self.messages.search_records(domain)
-            
-            for message in messages:
-                message_data = {
-                    'id': message.id,
-                    'subject': getattr(message, 'subject', '') or 'No subject',
-                    'body': getattr(message, 'body', '') or '',
-                    'author': message.author_id.name if message.author_id else 'System',
-                    'date': str(message.date) if message.date else '',
-                    'model': message.model,
-                    'res_id': message.res_id
-                }
-                self.message_cache[message.id] = message_data
-            
-            self._message_cache_built = True
-            
-            if self.verbose:
-                print(f"💬 Cached {len(self.message_cache)} messages")
-                
-        except Exception as e:
-            if self.verbose:
-                print(f"⚠️ Could not build message cache: {e}")
-            self.message_cache = {}
+        # Initialize empty cache - messages will be added as they're found during searches
+        self.message_cache = {}
+        self._message_cache_built = True
+        
+        if self.verbose:
+            print(f"💬 Message cache initialized (will populate during searches)")
     
     
     def _get_cached_project(self, project_id):
@@ -796,7 +798,7 @@ class OdooTextSearch(OdooBase):
             if since:
                 since_date = self._parse_time_reference(since)
         
-        # Build user and message caches upfront (messages don't change)
+        # Build user cache upfront and initialize message cache (messages cached on-demand)
         self._build_user_cache()
         self._build_message_cache()
         # Projects will be cached on-demand, tasks are not cached (they change frequently)
