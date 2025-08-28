@@ -223,7 +223,7 @@ try:
     
     for file in results.get("files", []):
         file["url"] = searcher.get_file_url(file["id"])
-        file["download_url"] = f"/api/download?id={{file[\\"id\\"]}}"
+        file["download_url"] = "/api/download?id=" + str(file["id"])
         if file.get("related_type") == "Project" and file.get("related_id"):
             file["related_url"] = searcher.get_project_url(file["related_id"])
         elif file.get("related_type") == "Task" and file.get("related_id"):
