@@ -290,18 +290,19 @@ except Exception as e:
             ]
             
             # Run the process
-            process = subprocess.run(cmd, capture_output=True, text=True, timeout=300)  # 5 minute timeout
+            process = subprocess.run(cmd, capture_output=True, text=True, timeout=300, cwd=os.getcwd())  # 5 minute timeout
             
             # Read results
             try:
                 with open(output_file_path, 'r') as f:
                     results = json.load(f)
-            except:
+            except Exception as read_error:
                 results = {
                     'success': False,
-                    'error': 'Failed to read search results',
+                    'error': f'Failed to read search results: {str(read_error)}',
                     'process_stdout': process.stdout,
-                    'process_stderr': process.stderr
+                    'process_stderr': process.stderr,
+                    'process_returncode': process.returncode
                 }
             
             # Update search status
@@ -313,14 +314,25 @@ except Exception as e:
                         'results': results
                     })
             
+            # Log process output for debugging
+            if process.stdout:
+                print(f"📝 Process output [{search_id[:8]}]: {process.stdout[:200]}...")
+            if process.stderr:
+                print(f"⚠️ Process errors [{search_id[:8]}]: {process.stderr[:200]}...")
+            if process.returncode != 0:
+                print(f"⚠️ Process exit code [{search_id[:8]}]: {process.returncode}")
+            
             # Cleanup temp files
             try:
                 os.unlink(input_file_path)
                 os.unlink(output_file_path)
-            except:
-                pass
+            except Exception as cleanup_error:
+                print(f"⚠️ Cleanup error [{search_id[:8]}]: {cleanup_error}")
                 
-            print(f"✅ Search [{search_id[:8]}] completed: {results.get('total', 0)} results")
+            if results.get('success'):
+                print(f"✅ Search [{search_id[:8]}] completed: {results.get('total', 0)} results")
+            else:
+                print(f"❌ Search [{search_id[:8]}] failed: {results.get('error', 'Unknown error')}")
             
         except subprocess.TimeoutExpired:
             with WebSearchHandler._search_lock:
