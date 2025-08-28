@@ -580,10 +580,16 @@ class WebSearchHandler(BaseHTTPRequestHandler):
             font-size: 12px;
             cursor: pointer;
             transition: opacity 0.3s;
+            position: relative;
         }
         
         .history-item:hover {
             opacity: 0.8;
+        }
+        
+        .history-item small {
+            opacity: 0.8;
+            font-size: 10px;
         }
         
         .loading {
@@ -618,6 +624,41 @@ class WebSearchHandler(BaseHTTPRequestHandler):
             border-radius: 12px;
             margin-bottom: 20px;
             box-shadow: var(--shadow);
+        }
+        
+        .results-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+        
+        .results-actions {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .cache-info {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            font-size: 0.9rem;
+        }
+        
+        .cache-age {
+            color: var(--warning-color);
+            font-weight: 500;
+        }
+        
+        .refresh-btn {
+            font-size: 0.8rem;
+            padding: 6px 12px;
+        }
+        
+        .refresh-btn:hover {
+            background-color: var(--accent-color);
+            color: white;
         }
         
         .results-stats {
@@ -912,6 +953,9 @@ class WebSearchHandler(BaseHTTPRequestHandler):
             
             <div class="form-row">
                 <button type="submit" class="btn btn-primary">🔍 Search</button>
+                <button type="button" class="btn btn-secondary" onclick="clearCache()" title="Clear cached results">
+                    🗑️ Clear Cache
+                </button>
             </div>
             
             <div class="search-history" id="searchHistory">
@@ -968,18 +1012,35 @@ class WebSearchHandler(BaseHTTPRequestHandler):
         const savedTheme = localStorage.getItem('theme') || 'light';
         document.documentElement.setAttribute('data-theme', savedTheme);
         
-        // Search history management
+        // Search history and results caching management
         function loadSearchHistory() {
             const history = JSON.parse(localStorage.getItem('searchHistory') || '[]');
+            const cachedResults = JSON.parse(localStorage.getItem('cachedSearchResults') || '{}');
             const historyContainer = document.getElementById('historyItems');
             historyContainer.innerHTML = '';
             
             history.slice(-10).reverse().forEach(term => {
                 const item = document.createElement('span');
                 item.className = 'history-item';
-                item.textContent = term;
+                
+                // Check if we have cached results for this term
+                const cacheKey = generateCacheKey(term);
+                const cached = cachedResults[cacheKey];
+                
+                if (cached) {
+                    const age = getResultAge(cached.timestamp);
+                    item.innerHTML = `${term} <small>(${age})</small>`;
+                    item.title = `Cached results from ${new Date(cached.timestamp).toLocaleString()}`;
+                } else {
+                    item.textContent = term;
+                }
+                
                 item.onclick = () => {
                     document.getElementById('searchTerm').value = term;
+                    if (cached) {
+                        // Load from cache
+                        loadCachedResults(term, cached);
+                    }
                 };
                 historyContainer.appendChild(item);
             });
@@ -992,6 +1053,95 @@ class WebSearchHandler(BaseHTTPRequestHandler):
             if (history.length > 20) history = history.slice(-20); // Keep last 20
             localStorage.setItem('searchHistory', JSON.stringify(history));
             loadSearchHistory();
+        }
+        
+        function generateCacheKey(searchTerm, params = {}) {
+            // Create a cache key based on search term and parameters
+            const key = {
+                term: searchTerm,
+                since: params.since || '',
+                type: params.type || 'all',
+                descriptions: params.descriptions !== false,
+                logs: params.logs !== false,
+                files: params.files !== false,
+                file_types: params.file_types || '',
+                limit: params.limit || ''
+            };
+            return btoa(JSON.stringify(key)).replace(/[^a-zA-Z0-9]/g, '');
+        }
+        
+        function cacheSearchResults(searchTerm, params, results) {
+            const cacheKey = generateCacheKey(searchTerm, params);
+            const cachedResults = JSON.parse(localStorage.getItem('cachedSearchResults') || '{}');
+            
+            cachedResults[cacheKey] = {
+                searchTerm: searchTerm,
+                params: params,
+                results: results,
+                timestamp: Date.now()
+            };
+            
+            // Keep only last 50 cached results to avoid localStorage bloat
+            const entries = Object.entries(cachedResults);
+            if (entries.length > 50) {
+                entries.sort((a, b) => b[1].timestamp - a[1].timestamp);
+                const keepEntries = entries.slice(0, 50);
+                const newCache = {};
+                keepEntries.forEach(([key, value]) => {
+                    newCache[key] = value;
+                });
+                localStorage.setItem('cachedSearchResults', JSON.stringify(newCache));
+            } else {
+                localStorage.setItem('cachedSearchResults', JSON.stringify(cachedResults));
+            }
+        }
+        
+        function loadCachedResults(searchTerm, cached) {
+            console.log('Loading cached results for:', searchTerm);
+            
+            // Set form values to match cached search
+            document.getElementById('searchTerm').value = cached.searchTerm;
+            document.getElementById('since').value = cached.params.since || '';
+            document.getElementById('searchType').value = cached.params.type || 'all';
+            document.getElementById('includeDescriptions').checked = cached.params.descriptions !== false;
+            document.getElementById('includeLogs').checked = cached.params.logs !== false;
+            document.getElementById('includeFiles').checked = cached.params.files !== false;
+            document.getElementById('fileTypes').value = cached.params.file_types || '';
+            document.getElementById('limit').value = cached.params.limit || '';
+            
+            // Display cached results with age indicator
+            displayCachedResults(cached);
+        }
+        
+        function getResultAge(timestamp) {
+            const now = Date.now();
+            const diff = now - timestamp;
+            const minutes = Math.floor(diff / 60000);
+            const hours = Math.floor(diff / 3600000);
+            const days = Math.floor(diff / 86400000);
+            
+            if (days > 0) return `${days}d ago`;
+            if (hours > 0) return `${hours}h ago`;
+            if (minutes > 0) return `${minutes}m ago`;
+            return 'just now';
+        }
+        
+        function displayCachedResults(cached) {
+            const age = getResultAge(cached.timestamp);
+            const ageDate = new Date(cached.timestamp).toLocaleString();
+            
+            // Create the cached results display with refresh option
+            const data = {
+                success: true,
+                results: cached.results,
+                total: cached.results.projects.length + cached.results.tasks.length + 
+                       cached.results.messages.length + cached.results.files.length,
+                cached: true,
+                age: age,
+                timestamp: ageDate
+            };
+            
+            displayResults(data);
         }
         
         // Settings management
@@ -1046,24 +1196,43 @@ class WebSearchHandler(BaseHTTPRequestHandler):
         }
         
         // Search functionality
-        function performSearch(event) {
+        function performSearch(event, forceRefresh = false) {
             event.preventDefault();
             
             const formData = new FormData(event.target);
-            const params = new URLSearchParams();
+            const searchParams = {
+                q: formData.get('searchTerm'),
+                since: formData.get('since') || '',
+                type: formData.get('searchType'),
+                descriptions: formData.get('includeDescriptions') ? 'true' : 'false',
+                logs: formData.get('includeLogs') ? 'true' : 'false',
+                files: formData.get('includeFiles') ? 'true' : 'false',
+                file_types: formData.get('fileTypes') || '',
+                limit: formData.get('limit') || ''
+            };
             
-            // Add form data to params
-            params.append('q', formData.get('searchTerm'));
-            if (formData.get('since')) params.append('since', formData.get('since'));
-            params.append('type', formData.get('searchType'));
-            params.append('descriptions', formData.get('includeDescriptions') ? 'true' : 'false');
-            params.append('logs', formData.get('includeLogs') ? 'true' : 'false');
-            params.append('files', formData.get('includeFiles') ? 'true' : 'false');
-            if (formData.get('fileTypes')) params.append('file_types', formData.get('fileTypes'));
-            if (formData.get('limit')) params.append('limit', formData.get('limit'));
+            // Check for cached results if not forcing refresh
+            if (!forceRefresh) {
+                const cacheKey = generateCacheKey(searchParams.q, searchParams);
+                const cachedResults = JSON.parse(localStorage.getItem('cachedSearchResults') || '{}');
+                const cached = cachedResults[cacheKey];
+                
+                if (cached) {
+                    console.log('Using cached results');
+                    displayCachedResults(cached);
+                    addToSearchHistory(searchParams.q);
+                    return;
+                }
+            }
+            
+            // Build URL params for API call
+            const params = new URLSearchParams();
+            Object.entries(searchParams).forEach(([key, value]) => {
+                if (value) params.append(key, value);
+            });
             
             // Add to search history
-            addToSearchHistory(formData.get('searchTerm'));
+            addToSearchHistory(searchParams.q);
             
             // Show loading
             document.getElementById('results').innerHTML = '<div class="loading">Searching...</div>';
@@ -1073,7 +1242,14 @@ class WebSearchHandler(BaseHTTPRequestHandler):
                 .then(response => response.json())
                 .then(data => {
                     if (data.success) {
+                        // Cache the results
+                        cacheSearchResults(searchParams.q, searchParams, data.results);
+                        
+                        // Display results
                         displayResults(data);
+                        
+                        // Update search history to show cached status
+                        loadSearchHistory();
                     } else {
                         document.getElementById('results').innerHTML = 
                             `<div class="error">Error: ${data.error}</div>`;
@@ -1084,6 +1260,12 @@ class WebSearchHandler(BaseHTTPRequestHandler):
                     document.getElementById('results').innerHTML = 
                         `<div class="error">Search failed: ${error.message}</div>`;
                 });
+        }
+        
+        function refreshSearch() {
+            const form = document.querySelector('.search-form');
+            const event = new Event('submit');
+            performSearch.call(form, event, true); // Force refresh
         }
         
         function displayResults(data) {
@@ -1098,7 +1280,26 @@ class WebSearchHandler(BaseHTTPRequestHandler):
             
             let html = `
                 <div class="results-summary">
-                    <h2>Search Results (${total} total)</h2>
+                    <div class="results-header">
+                        <h2>Search Results (${total} total)</h2>
+                        <div class="results-actions">
+            `;
+            
+            // Add age indicator and refresh button for cached results
+            if (data.cached) {
+                html += `
+                    <div class="cache-info">
+                        <span class="cache-age">📅 ${data.age} (${data.timestamp})</span>
+                        <button class="btn btn-secondary refresh-btn" onclick="refreshSearch()" title="Refresh results">
+                            🔄 Refresh
+                        </button>
+                    </div>
+                `;
+            }
+            
+            html += `
+                        </div>
+                    </div>
                     <div class="results-stats">
                         <a href="#projects-section" class="stat-item">📂 Projects: ${results.projects?.length || 0}</a>
                         <a href="#tasks-section" class="stat-item">📋 Tasks: ${results.tasks?.length || 0}</a>
@@ -1244,6 +1445,15 @@ class WebSearchHandler(BaseHTTPRequestHandler):
             const div = document.createElement('div');
             div.textContent = text;
             return div.innerHTML;
+        }
+        
+        // Cache management
+        function clearCache() {
+            if (confirm('Clear all cached search results?')) {
+                localStorage.removeItem('cachedSearchResults');
+                loadSearchHistory();
+                alert('Cache cleared successfully!');
+            }
         }
         
         // Initialize
