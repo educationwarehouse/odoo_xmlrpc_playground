@@ -405,6 +405,24 @@ class OdooTextSearch(OdooBase):
             
             # Enrich messages with related record info
             enriched_messages = []
+            
+            # Collect all unique task IDs that we need to look up
+            task_ids_needed = set()
+            for message_data in matching_messages:
+                if message_data['model'] == 'project.task' and message_data['res_id']:
+                    task_ids_needed.add(message_data['res_id'])
+            
+            # Batch lookup all needed tasks at once
+            task_name_cache = {}
+            if task_ids_needed:
+                try:
+                    task_records = self.tasks.search_records([('id', 'in', list(task_ids_needed))])
+                    for task in task_records:
+                        task_name_cache[task.id] = task.name
+                except Exception as e:
+                    if self.verbose:
+                        print(f"⚠️ Could not batch lookup tasks: {e}")
+            
             for message_data in matching_messages:
                 # Get related record info with caching
                 related_name = "Unknown"
@@ -418,14 +436,10 @@ class OdooTextSearch(OdooBase):
                         related_name = f"Project {message_data['res_id']}"
                         
                 elif message_data['model'] == 'project.task' and message_data['res_id']:
-                    # Don't use cached task data since tasks change frequently
-                    try:
-                        task_records = self.tasks.search_records([('id', '=', message_data['res_id'])])
-                        if task_records:
-                            related_name = task_records[0].name
-                        else:
-                            related_name = f"Task {message_data['res_id']}"
-                    except:
+                    # Use batch-loaded task names
+                    if message_data['res_id'] in task_name_cache:
+                        related_name = task_name_cache[message_data['res_id']]
+                    else:
                         related_name = f"Task {message_data['res_id']}"
                 
                 enriched_message = {
