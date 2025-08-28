@@ -51,7 +51,7 @@ class OdooTextSearch(OdooBase):
         # Aggressive caching system
         self.user_cache = {}
         self.project_cache = {}  # Cache full project records
-        self.task_cache = {}     # Cache full task records
+        self.message_cache = {}  # Cache message records (messages don't change)
         self.project_task_map = {}  # Map project_id -> [task_ids]
         self.task_project_map = {}  # Map task_id -> project_id
         self.attachment_cache = {}  # Cache attachment metadata
@@ -59,7 +59,7 @@ class OdooTextSearch(OdooBase):
         # Cache initialization flags
         self._user_cache_built = False
         self._project_cache_built = False
-        self._task_cache_built = False
+        self._message_cache_built = False
 
     def _parse_time_reference(self, time_ref):
         """
@@ -423,10 +423,14 @@ class OdooTextSearch(OdooBase):
                         related_name = f"Project {message.res_id}"
                         
                 elif message.model == 'project.task' and message.res_id:
-                    task_data = self._get_cached_task(message.res_id)
-                    if task_data:
-                        related_name = task_data['name']
-                    else:
+                    # Don't use cached task data since tasks change frequently
+                    try:
+                        task_records = self.tasks.search_records([('id', '=', message.res_id)])
+                        if task_records:
+                            related_name = task_records[0].name
+                        else:
+                            related_name = f"Task {message.res_id}"
+                    except:
                         related_name = f"Task {message.res_id}"
                 
                 enriched_message = {
@@ -619,80 +623,40 @@ class OdooTextSearch(OdooBase):
                 print(f"⚠️ Could not build project cache: {e}")
             self.project_cache = {}
 
-    def _build_task_cache(self):
-        """Build a cache of all tasks for efficient lookup"""
-        if self._task_cache_built:
+    def _build_message_cache(self):
+        """Build a cache of all messages for efficient lookup"""
+        if self._message_cache_built:
             return
             
         if self.verbose:
-            print("📋 Building task cache...")
+            print("💬 Building message cache...")
         
         try:
-            # Get all tasks with limited fields for efficiency
-            tasks = self.tasks.search_records([])
+            # Get all messages for projects and tasks
+            domain = ['|', ('model', '=', 'project.project'), ('model', '=', 'project.task')]
+            messages = self.messages.search_records(domain)
             
-            for task in tasks:
-                # Extract user ID safely
-                user_id = None
-                user_name = 'Unassigned'
-                
-                if hasattr(task, 'user_ids') and task.user_ids:
-                    try:
-                        if hasattr(task.user_ids, '__len__') and len(task.user_ids) > 0:
-                            first_user = task.user_ids[0]
-                            if hasattr(first_user, 'id'):
-                                user_id = first_user.id
-                                user_name = first_user.name if hasattr(first_user, 'name') else f'User {user_id}'
-                    except:
-                        pass
-                
-                # Get stage/status information
-                stage_name = 'No stage'
-                stage_id = None
-                if hasattr(task, 'stage_id') and task.stage_id:
-                    try:
-                        if hasattr(task.stage_id, 'name'):
-                            stage_name = task.stage_id.name
-                            stage_id = task.stage_id.id if hasattr(task.stage_id, 'id') else task.stage_id
-                        else:
-                            stage_id = task.stage_id
-                            stage_name = f'Stage {stage_id}'
-                    except:
-                        stage_name = 'Stage (unavailable)'
-                
-                task_data = {
-                    'id': task.id,
-                    'name': task.name,
-                    'description': getattr(task, 'description', '') or '',
-                    'project_id': task.project_id.id if task.project_id else None,
-                    'project_name': task.project_id.name if task.project_id else 'No project',
-                    'user_id': user_id,
-                    'user_name': user_name,
-                    'create_date': str(task.create_date) if task.create_date else '',
-                    'write_date': str(task.write_date) if task.write_date else '',
-                    'stage_id': stage_id,
-                    'stage_name': stage_name,
-                    'priority': getattr(task, 'priority', '0')
+            for message in messages:
+                message_data = {
+                    'id': message.id,
+                    'subject': getattr(message, 'subject', '') or 'No subject',
+                    'body': getattr(message, 'body', '') or '',
+                    'author': message.author_id.name if message.author_id else 'System',
+                    'date': str(message.date) if message.date else '',
+                    'model': message.model,
+                    'res_id': message.res_id
                 }
-                self.task_cache[task.id] = task_data
-                
-                # Build project-task mapping
-                if task_data['project_id']:
-                    if task_data['project_id'] not in self.project_task_map:
-                        self.project_task_map[task_data['project_id']] = []
-                    if task.id not in self.project_task_map[task_data['project_id']]:
-                        self.project_task_map[task_data['project_id']].append(task.id)
-                    self.task_project_map[task.id] = task_data['project_id']
+                self.message_cache[message.id] = message_data
             
-            self._task_cache_built = True
+            self._message_cache_built = True
             
             if self.verbose:
-                print(f"📋 Cached {len(self.task_cache)} tasks")
+                print(f"💬 Cached {len(self.message_cache)} messages")
                 
         except Exception as e:
             if self.verbose:
-                print(f"⚠️ Could not build task cache: {e}")
-            self.task_cache = {}
+                print(f"⚠️ Could not build message cache: {e}")
+            self.message_cache = {}
     
     
     def _get_cached_project(self, project_id):
@@ -728,69 +692,35 @@ class OdooTextSearch(OdooBase):
         
         return None
     
-    def _get_cached_task(self, task_id):
-        """Get task from cache, with fallback to direct lookup"""
-        if not self._task_cache_built:
-            self._build_task_cache()
+    def _get_cached_message(self, message_id):
+        """Get message from cache, with fallback to direct lookup"""
+        if not self._message_cache_built:
+            self._build_message_cache()
         
-        if task_id in self.task_cache:
-            return self.task_cache[task_id]
+        if message_id in self.message_cache:
+            return self.message_cache[message_id]
         
         # Fallback: direct lookup and cache
         try:
-            task_records = self.tasks.search_records([('id', '=', task_id)])
-            if task_records:
-                task = task_records[0]
+            message_records = self.messages.search_records([('id', '=', message_id)])
+            if message_records:
+                message = message_records[0]
                 
-                # Extract user ID safely
-                user_id = None
-                user_name = 'Unassigned'
-                
-                if hasattr(task, 'user_ids') and task.user_ids:
-                    try:
-                        if hasattr(task.user_ids, '__len__') and len(task.user_ids) > 0:
-                            first_user = task.user_ids[0]
-                            if hasattr(first_user, 'id'):
-                                user_id = first_user.id
-                                user_name = first_user.name if hasattr(first_user, 'name') else f'User {user_id}'
-                    except:
-                        pass
-                
-                # Get stage/status information
-                stage_name = 'No stage'
-                stage_id = None
-                if hasattr(task, 'stage_id') and task.stage_id:
-                    try:
-                        if hasattr(task.stage_id, 'name'):
-                            stage_name = task.stage_id.name
-                            stage_id = task.stage_id.id if hasattr(task.stage_id, 'id') else task.stage_id
-                        else:
-                            # stage_id might be just an ID, try to get the name
-                            stage_id = task.stage_id
-                            stage_name = f'Stage {stage_id}'
-                    except:
-                        stage_name = 'Stage (unavailable)'
-
-                task_data = {
-                    'id': task.id,
-                    'name': task.name,
-                    'description': getattr(task, 'description', '') or '',
-                    'project_id': task.project_id.id if task.project_id else None,
-                    'project_name': task.project_id.name if task.project_id else 'No project',
-                    'user_id': user_id,
-                    'user_name': user_name,
-                    'create_date': str(task.create_date) if task.create_date else '',
-                    'write_date': str(task.write_date) if task.write_date else '',
-                    'stage_id': stage_id,
-                    'stage_name': stage_name,
-                    'priority': getattr(task, 'priority', '0')
+                message_data = {
+                    'id': message.id,
+                    'subject': getattr(message, 'subject', '') or 'No subject',
+                    'body': getattr(message, 'body', '') or '',
+                    'author': message.author_id.name if message.author_id else 'System',
+                    'date': str(message.date) if message.date else '',
+                    'model': message.model,
+                    'res_id': message.res_id
                 }
                 
-                self.task_cache[task_id] = task_data
-                return task_data
+                self.message_cache[message_id] = message_data
+                return message_data
         except Exception as e:
             if self.verbose:
-                print(f"⚠️ Could not fetch task {task_id}: {e}")
+                print(f"⚠️ Could not fetch message {message_id}: {e}")
         
         return None
 
@@ -856,9 +786,10 @@ class OdooTextSearch(OdooBase):
             if since:
                 since_date = self._parse_time_reference(since)
         
-        # Build only user cache upfront (fast and small)
+        # Build user and message caches upfront (messages don't change)
         self._build_user_cache()
-        # Projects and tasks will be cached on-demand
+        self._build_message_cache()
+        # Projects will be cached on-demand, tasks are not cached (they change frequently)
         
         results = {
             'projects': [],
@@ -986,24 +917,46 @@ class OdooTextSearch(OdooBase):
                         })
                 
                 elif file.res_model == 'project.task':
-                    task_data = self._get_cached_task(file.res_id)
-                    if task_data:
-                        enriched_file.update({
-                            'related_type': 'Task',
-                            'related_name': task_data['name'],
-                            'related_id': task_data['id'],
-                            'task_name': task_data['name'],
-                            'task_id': task_data['id'],
-                            'project_name': task_data['project_name'],
-                            'project_id': task_data['project_id'],
-                            'assigned_user': task_data['user_name']
-                        })
-                    else:
+                    # Don't use cached task data since tasks change frequently
+                    try:
+                        task_records = self.tasks.search_records([('id', '=', file.res_id)])
+                        if task_records:
+                            task = task_records[0]
+                            
+                            # Extract user ID safely
+                            user_name = 'Unassigned'
+                            if hasattr(task, 'user_ids') and task.user_ids:
+                                try:
+                                    if hasattr(task.user_ids, '__len__') and len(task.user_ids) > 0:
+                                        first_user = task.user_ids[0]
+                                        if hasattr(first_user, 'name'):
+                                            user_name = first_user.name
+                                except:
+                                    pass
+                            
+                            enriched_file.update({
+                                'related_type': 'Task',
+                                'related_name': task.name,
+                                'related_id': task.id,
+                                'task_name': task.name,
+                                'task_id': task.id,
+                                'project_name': task.project_id.name if task.project_id else 'No project',
+                                'project_id': task.project_id.id if task.project_id else None,
+                                'assigned_user': user_name
+                            })
+                        else:
+                            enriched_file.update({
+                                'related_type': 'Task',
+                                'related_name': f'Task {file.res_id}',
+                                'related_id': file.res_id,
+                                'error': 'Task record not found'
+                            })
+                    except Exception as e:
                         enriched_file.update({
                             'related_type': 'Task',
                             'related_name': f'Task {file.res_id}',
                             'related_id': file.res_id,
-                            'error': 'Task record not found'
+                            'error': f'Task lookup failed: {e}'
                         })
                 
                 else:
