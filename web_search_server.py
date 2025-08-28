@@ -128,13 +128,20 @@ class WebSearchHandler(BaseHTTPRequestHandler):
             
             # Add URLs to results using the searcher instance
             self.add_urls_to_results(results, searcher)
+
+            # Make results JSON-safe
+            json_safe_results = self.make_results_json_safe(results)
+
+            # Calculate totals
+            total_results = sum(len(json_safe_results.get(key, [])) for key in ['projects', 'tasks', 'messages', 'files'])
+
             
             # Calculate totals
             total_results = sum(len(results.get(key, [])) for key in ['projects', 'tasks', 'messages', 'files'])
             
             response = {
                 'success': True,
-                'results': results,
+                'results': json_safe_results,
                 'total': total_results,
                 'search_params': {
                     'search_term': search_term,
@@ -147,6 +154,8 @@ class WebSearchHandler(BaseHTTPRequestHandler):
                     'limit': limit
                 }
             }
+
+            self.send_json_response(response)
             
             self.send_json_response(response)
             
