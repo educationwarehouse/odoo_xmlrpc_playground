@@ -103,14 +103,7 @@ class WebSearchHandler(BaseHTTPRequestHandler):
             # Log search request to console
             print(f"🔍 Web search request: '{search_term}' (type: {search_type}, since: {since})")
 
-            # Log search request to console
-            print(f"🔍 Web search request: '{search_term}' (type: {search_type}, since: {since})")
-
-            # Log search request to console
-            print(f"🔍 Web search request: '{search_term}' (type: {search_type}, since: {since})")
-
-            # Log search request to console
-            print(f"🔍 Web search request: '{search_term}' (type: {search_type}, since: {since})")
+            # Create a new searcher instance for this request
 
             
             # Create a new searcher instance for this request
