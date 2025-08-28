@@ -182,6 +182,9 @@ class WebSearchHandler(BaseHTTPRequestHandler):
 import sys
 import json
 import os
+import threading
+import concurrent.futures
+from datetime import datetime
 sys.path.insert(0, "{os.getcwd()}")
 from text_search import OdooTextSearch
 
@@ -193,17 +196,88 @@ try:
     # Create searcher instance
     searcher = OdooTextSearch(verbose=True)
     
-    # Perform search
-    results = searcher.full_text_search(
-        search_term=params["search_term"],
-        since=params["since"],
-        search_type=params["search_type"],
-        include_descriptions=params["include_descriptions"],
-        include_logs=params["include_logs"],
-        include_files=params["include_files"],
-        file_types=params["file_types"],
-        limit=params["limit"]
-    )
+    # Parse time reference
+    since_date = None
+    if params["since"]:
+        since_date = searcher._parse_time_reference(params["since"])
+    
+    # Build user and message caches upfront
+    searcher._build_user_cache()
+    searcher._build_message_cache()
+    
+    # Initialize results
+    results = {{
+        "projects": [],
+        "tasks": [],
+        "messages": [],
+        "files": []
+    }}
+    
+    # Define search functions for parallel execution
+    def search_projects():
+        if params["search_type"] in ["all", "projects"]:
+            return searcher.search_projects(
+                params["search_term"], 
+                since_date, 
+                params["include_descriptions"], 
+                params["limit"]
+            )
+        return []
+    
+    def search_tasks():
+        if params["search_type"] in ["all", "tasks"]:
+            return searcher.search_tasks(
+                params["search_term"], 
+                since_date, 
+                params["include_descriptions"], 
+                None, 
+                params["limit"]
+            )
+        return []
+    
+    def search_messages():
+        if params["include_logs"] and params["search_type"] in ["all", "logs"]:
+            model_type = "both" if params["search_type"] == "all" else params["search_type"]
+            return searcher.search_messages(
+                params["search_term"], 
+                since_date, 
+                model_type, 
+                params["limit"]
+            )
+        return []
+    
+    def search_files():
+        if params["include_files"] or params["search_type"] == "files":
+            model_type = "all" if params["search_type"] in ["all", "files"] else params["search_type"]
+            return searcher.search_files(
+                params["search_term"], 
+                since_date, 
+                params["file_types"], 
+                model_type, 
+                params["limit"]
+            )
+        return []
+    
+    # Execute searches in parallel using ThreadPoolExecutor
+    with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
+        # Submit all search tasks
+        future_to_category = {{
+            executor.submit(search_projects): "projects",
+            executor.submit(search_tasks): "tasks", 
+            executor.submit(search_messages): "messages",
+            executor.submit(search_files): "files"
+        }}
+        
+        # Collect results as they complete
+        for future in concurrent.futures.as_completed(future_to_category):
+            category = future_to_category[future]
+            try:
+                result = future.result()
+                results[category] = result
+                print(f"✅ {category.capitalize()} search completed: {{len(result)}} results")
+            except Exception as exc:
+                print(f"❌ {category.capitalize()} search failed: {{exc}}")
+                results[category] = []
     
     # Add URLs to results
     for project in results.get("projects", []):
