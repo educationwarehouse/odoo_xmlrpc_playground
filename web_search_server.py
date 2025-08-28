@@ -99,10 +99,15 @@ class WebSearchHandler(BaseHTTPRequestHandler):
             if not search_term:
                 self.send_json_response({'error': 'Search term is required'}, 400)
                 return
+
+            # Log search request to console
+            print(f"🔍 Web search request: '{search_term}' (type: {search_type}, since: {since})")
+
             
             # Create a new searcher instance for this request
             try:
                 searcher = OdooTextSearch(verbose=False)
+
             except Exception as e:
                 self.send_json_response({'error': f'Failed to connect to Odoo: {str(e)}'}, 500)
                 return
@@ -145,9 +150,16 @@ class WebSearchHandler(BaseHTTPRequestHandler):
             
         except Exception as e:
             import traceback
+            error_msg = f"Search error: {str(e)}"
+            traceback_msg = traceback.format_exc()
+
+            # Print to console
+            print(f"❌ {error_msg}")
+            print(f"   Traceback: {traceback_msg}")
+
             self.send_json_response({
-                'error': str(e),
-                'traceback': traceback.format_exc()
+                'error': error_msg,
+                'traceback': traceback_msg
             }, 500)
     
     def handle_download_api(self, query_string):
@@ -163,6 +175,7 @@ class WebSearchHandler(BaseHTTPRequestHandler):
             # Create a new searcher instance for this request
             try:
                 searcher = OdooTextSearch(verbose=False)
+
             except Exception as e:
                 self.send_json_response({'error': f'Failed to connect to Odoo: {str(e)}'}, 500)
                 return
@@ -208,9 +221,16 @@ class WebSearchHandler(BaseHTTPRequestHandler):
             
         except Exception as e:
             import traceback
+            error_msg = f"Search error: {str(e)}"
+            traceback_msg = traceback.format_exc()
+
+            # Print to console
+            print(f"❌ {error_msg}")
+            print(f"   Traceback: {traceback_msg}")
+
             self.send_json_response({
-                'error': str(e),
-                'traceback': traceback.format_exc()
+                'error': error_msg,
+                'traceback': traceback_msg
             }, 500)
     
     def handle_settings_get(self):
