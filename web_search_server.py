@@ -100,16 +100,15 @@ class WebSearchHandler(BaseHTTPRequestHandler):
                 self.send_json_response({'error': 'Search term is required'}, 400)
                 return
             
-            # Initialize searcher if needed
-            if not self.searcher:
-                try:
-                    self.searcher = OdooTextSearch(verbose=False)
-                except Exception as e:
-                    self.send_json_response({'error': f'Failed to connect to Odoo: {str(e)}'}, 500)
-                    return
+            # Create a new searcher instance for this request
+            try:
+                searcher = OdooTextSearch(verbose=False)
+            except Exception as e:
+                self.send_json_response({'error': f'Failed to connect to Odoo: {str(e)}'}, 500)
+                return
             
             # Perform search
-            results = self.searcher.full_text_search(
+            results = searcher.full_text_search(
                 search_term=search_term,
                 since=since,
                 search_type=search_type,
@@ -120,8 +119,8 @@ class WebSearchHandler(BaseHTTPRequestHandler):
                 limit=limit
             )
             
-            # Add URLs to results
-            self.add_urls_to_results(results)
+            # Add URLs to results using the searcher instance
+            self.add_urls_to_results(results, searcher)
             
             # Calculate totals
             total_results = sum(len(results.get(key, [])) for key in ['projects', 'tasks', 'messages', 'files'])
@@ -145,7 +144,11 @@ class WebSearchHandler(BaseHTTPRequestHandler):
             self.send_json_response(response)
             
         except Exception as e:
-            self.send_json_response({'error': str(e)}, 500)
+            import traceback
+            self.send_json_response({
+                'error': str(e),
+                'traceback': traceback.format_exc()
+            }, 500)
     
     def handle_download_api(self, query_string):
         """Handle file download API requests"""
@@ -157,16 +160,15 @@ class WebSearchHandler(BaseHTTPRequestHandler):
                 self.send_json_response({'error': 'File ID is required'}, 400)
                 return
             
-            # Initialize searcher if needed
-            if not self.searcher:
-                try:
-                    self.searcher = OdooTextSearch(verbose=False)
-                except Exception as e:
-                    self.send_json_response({'error': f'Failed to connect to Odoo: {str(e)}'}, 500)
-                    return
+            # Create a new searcher instance for this request
+            try:
+                searcher = OdooTextSearch(verbose=False)
+            except Exception as e:
+                self.send_json_response({'error': f'Failed to connect to Odoo: {str(e)}'}, 500)
+                return
             
             # Get file info first
-            attachment_records = self.searcher.attachments.search_records([('id', '=', int(file_id))])
+            attachment_records = searcher.attachments.search_records([('id', '=', int(file_id))])
             
             if not attachment_records:
                 self.send_json_response({'error': 'File not found'}, 404)
@@ -205,7 +207,11 @@ class WebSearchHandler(BaseHTTPRequestHandler):
             self.wfile.write(file_data)
             
         except Exception as e:
-            self.send_json_response({'error': str(e)}, 500)
+            import traceback
+            self.send_json_response({
+                'error': str(e),
+                'traceback': traceback.format_exc()
+            }, 500)
     
     def handle_settings_get(self):
         """Handle GET request for settings"""
@@ -272,39 +278,39 @@ class WebSearchHandler(BaseHTTPRequestHandler):
         except Exception as e:
             self.send_json_response({'error': str(e)}, 500)
     
-    def add_urls_to_results(self, results):
+    def add_urls_to_results(self, results, searcher):
         """Add URLs to search results"""
-        if not self.searcher:
+        if not searcher:
             return
         
         # Add URLs to projects
         for project in results.get('projects', []):
-            project['url'] = self.searcher.get_project_url(project['id'])
+            project['url'] = searcher.get_project_url(project['id'])
         
         # Add URLs to tasks
         for task in results.get('tasks', []):
-            task['url'] = self.searcher.get_task_url(task['id'])
+            task['url'] = searcher.get_task_url(task['id'])
             if task.get('project_id'):
-                task['project_url'] = self.searcher.get_project_url(task['project_id'])
+                task['project_url'] = searcher.get_project_url(task['project_id'])
         
         # Add URLs to messages
         for message in results.get('messages', []):
-            message['url'] = self.searcher.get_message_url(message['id'])
+            message['url'] = searcher.get_message_url(message['id'])
             if message.get('model') == 'project.project' and message.get('res_id'):
-                message['related_url'] = self.searcher.get_project_url(message['res_id'])
+                message['related_url'] = searcher.get_project_url(message['res_id'])
             elif message.get('model') == 'project.task' and message.get('res_id'):
-                message['related_url'] = self.searcher.get_task_url(message['res_id'])
+                message['related_url'] = searcher.get_task_url(message['res_id'])
         
         # Add URLs to files
         for file in results.get('files', []):
-            file['url'] = self.searcher.get_file_url(file['id'])
+            file['url'] = searcher.get_file_url(file['id'])
             file['download_url'] = f'/api/download?id={file["id"]}'
             if file.get('related_type') == 'Project' and file.get('related_id'):
-                file['related_url'] = self.searcher.get_project_url(file['related_id'])
+                file['related_url'] = searcher.get_project_url(file['related_id'])
             elif file.get('related_type') == 'Task' and file.get('related_id'):
-                file['related_url'] = self.searcher.get_task_url(file['related_id'])
+                file['related_url'] = searcher.get_task_url(file['related_id'])
                 if file.get('project_id'):
-                    file['project_url'] = self.searcher.get_project_url(file['project_id'])
+                    file['project_url'] = searcher.get_project_url(file['project_id'])
     
     def send_json_response(self, data, status_code=200):
         """Send JSON response"""
