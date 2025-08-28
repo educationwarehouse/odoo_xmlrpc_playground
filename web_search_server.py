@@ -1264,8 +1264,9 @@ class WebSearchHandler(BaseHTTPRequestHandler):
         
         function refreshSearch() {
             const form = document.querySelector('.search-form');
-            const event = new Event('submit');
-            performSearch.call(form, event, true); // Force refresh
+            const event = new Event('submit', { cancelable: true });
+            event.preventDefault = function() {}; // Add preventDefault method
+            performSearch(event, true); // Force refresh
         }
         
         function displayResults(data) {
