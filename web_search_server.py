@@ -1290,10 +1290,11 @@ class WebSearchHandler(BaseHTTPRequestHandler):
             // Update search history to remove cached indicator
             loadSearchHistory();
             
-            // Resubmit the search
-            const event = new Event('submit', { cancelable: true });
-            event.preventDefault = function() {}; // Add preventDefault method
-            performSearch(event, false); // Don't force refresh since we already cleared cache
+            // Trigger the search button click
+            const searchButton = document.querySelector('.search-form button[type="submit"]');
+            if (searchButton) {
+                searchButton.click();
+            }
         }
         
         function displayResults(data) {
