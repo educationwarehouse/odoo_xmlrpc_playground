@@ -215,48 +215,80 @@ try:
     
     # Define search functions for parallel execution
     def search_projects():
-        if params["search_type"] in ["all", "projects"]:
-            return searcher.search_projects(
-                params["search_term"], 
-                since_date, 
-                params["include_descriptions"], 
-                params["limit"]
-            )
-        return []
+        try:
+            if params["search_type"] in ["all", "projects"]:
+                result = searcher.search_projects(
+                    params["search_term"], 
+                    since_date, 
+                    params["include_descriptions"], 
+                    params["limit"]
+                )
+                print(f"DEBUG: Projects search returned {{len(result)}} results")
+                return result
+            else:
+                print(f"DEBUG: Skipping projects search (type: {{params['search_type']}})")
+                return []
+        except Exception as e:
+            print(f"ERROR in search_projects: {{e}}")
+            return []
     
     def search_tasks():
-        if params["search_type"] in ["all", "tasks"]:
-            return searcher.search_tasks(
-                params["search_term"], 
-                since_date, 
-                params["include_descriptions"], 
-                None, 
-                params["limit"]
-            )
-        return []
+        try:
+            if params["search_type"] in ["all", "tasks"]:
+                result = searcher.search_tasks(
+                    params["search_term"], 
+                    since_date, 
+                    params["include_descriptions"], 
+                    None, 
+                    params["limit"]
+                )
+                print(f"DEBUG: Tasks search returned {{len(result)}} results")
+                return result
+            else:
+                print(f"DEBUG: Skipping tasks search (type: {{params['search_type']}})")
+                return []
+        except Exception as e:
+            print(f"ERROR in search_tasks: {{e}}")
+            return []
     
     def search_messages():
-        if params["include_logs"] and params["search_type"] in ["all", "logs"]:
-            model_type = "both" if params["search_type"] == "all" else params["search_type"]
-            return searcher.search_messages(
-                params["search_term"], 
-                since_date, 
-                model_type, 
-                params["limit"]
-            )
-        return []
+        try:
+            if params["include_logs"] and params["search_type"] in ["all", "logs"]:
+                model_type = "both" if params["search_type"] == "all" else params["search_type"]
+                result = searcher.search_messages(
+                    params["search_term"], 
+                    since_date, 
+                    model_type, 
+                    params["limit"]
+                )
+                print(f"DEBUG: Messages search returned {{len(result)}} results")
+                return result
+            else:
+                print(f"DEBUG: Skipping messages search (type: {{params['search_type']}}, logs: {{params['include_logs']}})")
+                return []
+        except Exception as e:
+            print(f"ERROR in search_messages: {{e}}")
+            return []
     
     def search_files():
-        if params["include_files"] or params["search_type"] == "files":
-            model_type = "all" if params["search_type"] in ["all", "files"] else params["search_type"]
-            return searcher.search_files(
-                params["search_term"], 
-                since_date, 
-                params["file_types"], 
-                model_type, 
-                params["limit"]
-            )
-        return []
+        try:
+            if params["include_files"] or params["search_type"] == "files":
+                model_type = "all" if params["search_type"] in ["all", "files"] else params["search_type"]
+                result = searcher.search_files(
+                    params["search_term"], 
+                    since_date, 
+                    params["file_types"], 
+                    model_type, 
+                    params["limit"]
+                )
+                print(f"DEBUG: Files search returned {{len(result)}} results")
+                return result
+            else:
+                print(f"DEBUG: Skipping files search (type: {{params['search_type']}}, files: {{params['include_files']}})")
+                return []
+        except Exception as e:
+            print(f"ERROR in search_files: {{e}}")
+            return []
     
     # Execute searches in parallel using ThreadPoolExecutor
     with concurrent.futures.ThreadPoolExecutor(max_workers=4) as executor:
@@ -269,14 +301,22 @@ try:
         }}
         
         # Wait for all futures to complete and collect results
+        print(f"DEBUG: Waiting for {{len(futures)}} search tasks to complete...")
         for category, future in futures.items():
             try:
+                print(f"DEBUG: Getting result for {{category}}...")
                 result = future.result()
                 results[category] = result
                 print(f"✅ {{category.capitalize()}} search completed: {{len(result)}} results")
             except Exception as exc:
                 print(f"❌ {{category.capitalize()}} search failed: {{exc}}")
+                import traceback
+                print(f"   Traceback: {{traceback.format_exc()}}")
                 results[category] = []
+        
+        print(f"DEBUG: Final results summary:")
+        for category, items in results.items():
+            print(f"  {{category}}: {{len(items)}} items")
     
     # Add URLs to results
     for project in results.get("projects", []):
