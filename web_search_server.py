@@ -724,6 +724,12 @@ class WebSearchHandler(BaseHTTPRequestHandler):
             margin-bottom: 10px;
         }
         
+        .result-actions {
+            display: flex;
+            gap: 8px;
+            align-items: center;
+        }
+        
         .result-title {
             font-size: 1.1rem;
             font-weight: 600;
@@ -814,6 +820,105 @@ class WebSearchHandler(BaseHTTPRequestHandler):
             box-shadow: 0 4px 20px rgba(0,0,0,0.3);
         }
         
+        .pins-modal {
+            max-width: 800px;
+            max-height: 80vh;
+            overflow-y: auto;
+        }
+        
+        .pins-actions {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+            padding-bottom: 15px;
+            border-bottom: 1px solid var(--border-color);
+        }
+        
+        .pins-container {
+            max-height: 60vh;
+            overflow-y: auto;
+        }
+        
+        .pin-item {
+            background: var(--card-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 15px;
+            margin-bottom: 10px;
+            position: relative;
+        }
+        
+        .pin-item-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+            margin-bottom: 8px;
+        }
+        
+        .pin-item-title {
+            font-weight: 600;
+            color: var(--accent-color);
+        }
+        
+        .pin-item-title a {
+            color: var(--accent-color);
+            text-decoration: none;
+        }
+        
+        .pin-item-title a:hover {
+            text-decoration: underline;
+        }
+        
+        .unpin-btn {
+            background: var(--danger-color);
+            color: white;
+            border: none;
+            border-radius: 4px;
+            padding: 4px 8px;
+            font-size: 12px;
+            cursor: pointer;
+        }
+        
+        .unpin-btn:hover {
+            opacity: 0.8;
+        }
+        
+        .pin-item-meta {
+            font-size: 0.9rem;
+            color: #666;
+            margin-bottom: 8px;
+        }
+        
+        [data-theme="dark"] .pin-item-meta {
+            color: #aaa;
+        }
+        
+        .pin-item-description {
+            font-size: 0.9rem;
+            line-height: 1.4;
+            color: var(--text-color);
+        }
+        
+        .pin-btn {
+            background: var(--warning-color);
+            color: #333;
+            border: none;
+            border-radius: 4px;
+            padding: 4px 8px;
+            font-size: 12px;
+            cursor: pointer;
+            margin-left: 8px;
+        }
+        
+        .pin-btn:hover {
+            opacity: 0.8;
+        }
+        
+        .pin-btn.pinned {
+            background: var(--success-color);
+            color: white;
+        }
+        
         .modal-header {
             display: flex;
             justify-content: space-between;
@@ -894,6 +999,7 @@ class WebSearchHandler(BaseHTTPRequestHandler):
             <h1>🔍 Odoo Search</h1>
             <div class="header-controls">
                 <button class="theme-toggle" onclick="toggleTheme()" title="Toggle theme">🌓</button>
+                <button class="btn btn-secondary" onclick="openPins()">📌 Pins</button>
                 <button class="btn btn-secondary" onclick="openSettings()">⚙️ Settings</button>
             </div>
         </div>
@@ -953,6 +1059,9 @@ class WebSearchHandler(BaseHTTPRequestHandler):
                 <button type="button" class="btn btn-secondary" onclick="clearCache()" title="Clear cached results">
                     🗑️ Clear Cache
                 </button>
+                <button type="button" class="btn btn-secondary" onclick="scrollToResults()" title="Scroll to results">
+                    ⬇️ Results
+                </button>
             </div>
             
             <div class="search-history" id="searchHistory">
@@ -993,6 +1102,23 @@ class WebSearchHandler(BaseHTTPRequestHandler):
                     <button type="button" class="btn btn-secondary" onclick="closeSettings()">Cancel</button>
                 </div>
             </form>
+        </div>
+    </div>
+    
+    <!-- Pins Modal -->
+    <div id="pinsModal" class="modal">
+        <div class="modal-content pins-modal">
+            <div class="modal-header">
+                <h2>📌 Pinned Items</h2>
+                <span class="close" onclick="closePins()">&times;</span>
+            </div>
+            <div class="pins-actions">
+                <button type="button" class="btn btn-secondary" onclick="clearAllPins()">🗑️ Clear All Pins</button>
+                <button type="button" class="btn btn-secondary" onclick="exportPins()">📤 Export Pins</button>
+            </div>
+            <div id="pinsContainer" class="pins-container">
+                <!-- Pinned items will be loaded here -->
+            </div>
         </div>
     </div>
     
@@ -1299,6 +1425,9 @@ class WebSearchHandler(BaseHTTPRequestHandler):
             const results = data.results;
             const total = data.total;
             
+            // Store current results globally for pin functionality
+            window.currentSearchResults = results;
+            
             if (total === 0) {
                 resultsContainer.innerHTML = '<div class="error">No results found.</div>';
                 return;
@@ -1385,9 +1514,18 @@ class WebSearchHandler(BaseHTTPRequestHandler):
             html += ` <small>(ID: ${item.id})</small></div>`;
             
             // Actions
+            html += `<div class="result-actions">`;
             if (type === 'file' && item.download_url) {
                 html += `<a href="${item.download_url}" class="download-btn">📥 Download</a>`;
             }
+            
+            // Pin button
+            const isPinned = isItemPinned(item.id, type);
+            const pinText = isPinned ? '📌 Unpin' : '📌 Pin';
+            const pinClass = isPinned ? 'pin-btn pinned' : 'pin-btn';
+            html += `<button class="${pinClass}" onclick="togglePin('${item.id}', '${type}', this)" title="${pinText}">${pinText}</button>`;
+            
+            html += `</div>`;
             html += `</div>`;
             
             // Metadata
@@ -1473,6 +1611,222 @@ class WebSearchHandler(BaseHTTPRequestHandler):
             return div.innerHTML;
         }
         
+        // Pins management
+        function openPins() {
+            document.getElementById('pinsModal').style.display = 'block';
+            loadPins();
+        }
+        
+        function closePins() {
+            document.getElementById('pinsModal').style.display = 'none';
+        }
+        
+        function loadPins() {
+            const pins = JSON.parse(localStorage.getItem('pinnedItems') || '[]');
+            const container = document.getElementById('pinsContainer');
+            
+            if (pins.length === 0) {
+                container.innerHTML = '<div class="error">No pinned items yet. Pin items from search results to see them here.</div>';
+                return;
+            }
+            
+            let html = '';
+            pins.forEach(pin => {
+                html += renderPinItem(pin);
+            });
+            
+            container.innerHTML = html;
+        }
+        
+        function renderPinItem(pin) {
+            const typeIcon = {
+                'project': '📂',
+                'task': '📋', 
+                'message': '💬',
+                'file': '📁'
+            }[pin.type] || '📄';
+            
+            let html = `
+                <div class="pin-item">
+                    <div class="pin-item-header">
+                        <div class="pin-item-title">
+                            ${typeIcon} 
+            `;
+            
+            if (pin.url) {
+                html += `<a href="${pin.url}" target="_blank">${escapeHtml(pin.name)}</a>`;
+            } else {
+                html += escapeHtml(pin.name);
+            }
+            
+            html += ` <small>(ID: ${pin.id})</small>
+                        </div>
+                        <button class="unpin-btn" onclick="unpinItem('${pin.id}', '${pin.type}')">🗑️ Remove</button>
+                    </div>
+            `;
+            
+            // Meta information
+            if (pin.meta) {
+                html += `<div class="pin-item-meta">${escapeHtml(pin.meta)}</div>`;
+            }
+            
+            // Description
+            if (pin.description) {
+                const truncated = pin.description.length > 200 ? pin.description.substring(0, 200) + '...' : pin.description;
+                html += `<div class="pin-item-description">${escapeHtml(truncated)}</div>`;
+            }
+            
+            html += `<div class="pin-item-meta">Pinned: ${new Date(pin.pinnedAt).toLocaleString()}</div>`;
+            html += `</div>`;
+            
+            return html;
+        }
+        
+        function togglePin(itemId, itemType, buttonElement) {
+            const pins = JSON.parse(localStorage.getItem('pinnedItems') || '[]');
+            const existingIndex = pins.findIndex(p => p.id === itemId && p.type === itemType);
+            
+            if (existingIndex >= 0) {
+                // Unpin
+                pins.splice(existingIndex, 1);
+                buttonElement.textContent = '📌 Pin';
+                buttonElement.className = 'pin-btn';
+                buttonElement.title = '📌 Pin';
+            } else {
+                // Pin - find the item data from current search results
+                const itemData = findItemInResults(itemId, itemType);
+                if (itemData) {
+                    const pinItem = createPinItem(itemData, itemType);
+                    pins.push(pinItem);
+                    buttonElement.textContent = '📌 Unpin';
+                    buttonElement.className = 'pin-btn pinned';
+                    buttonElement.title = '📌 Unpin';
+                }
+            }
+            
+            localStorage.setItem('pinnedItems', JSON.stringify(pins));
+        }
+        
+        function findItemInResults(itemId, itemType) {
+            // Search through current results to find the item
+            const resultsContainer = document.getElementById('results');
+            if (!resultsContainer || !window.currentSearchResults) return null;
+            
+            const results = window.currentSearchResults;
+            const categoryMap = {
+                'project': 'projects',
+                'task': 'tasks',
+                'message': 'messages',
+                'file': 'files'
+            };
+            
+            const category = categoryMap[itemType];
+            if (!category || !results[category]) return null;
+            
+            return results[category].find(item => item.id == itemId);
+        }
+        
+        function createPinItem(itemData, itemType) {
+            const pin = {
+                id: itemData.id,
+                type: itemType,
+                name: itemData.name || itemData.subject || 'Untitled',
+                url: itemData.url || null,
+                pinnedAt: Date.now()
+            };
+            
+            // Add type-specific metadata
+            if (itemType === 'project') {
+                pin.meta = `Client: ${itemData.partner || 'No client'} | User: ${itemData.user || 'Unassigned'}`;
+                pin.description = itemData.description || '';
+            } else if (itemType === 'task') {
+                pin.meta = `Project: ${itemData.project_name || 'No project'} | User: ${itemData.user || 'Unassigned'} | Stage: ${itemData.stage || 'No stage'}`;
+                pin.description = itemData.description || '';
+            } else if (itemType === 'message') {
+                pin.meta = `Author: ${itemData.author || 'System'} | Related: ${itemData.related_name || 'Unknown'}`;
+                pin.description = itemData.body || '';
+            } else if (itemType === 'file') {
+                pin.meta = `Type: ${itemData.mimetype || 'Unknown'} | Size: ${itemData.file_size_human || '0 B'} | Related: ${itemData.related_name || 'Unknown'}`;
+                pin.description = '';
+            }
+            
+            return pin;
+        }
+        
+        function isItemPinned(itemId, itemType) {
+            const pins = JSON.parse(localStorage.getItem('pinnedItems') || '[]');
+            return pins.some(p => p.id == itemId && p.type === itemType);
+        }
+        
+        function unpinItem(itemId, itemType) {
+            const pins = JSON.parse(localStorage.getItem('pinnedItems') || '[]');
+            const filteredPins = pins.filter(p => !(p.id == itemId && p.type === itemType));
+            localStorage.setItem('pinnedItems', JSON.stringify(filteredPins));
+            loadPins();
+            
+            // Update pin buttons in search results if visible
+            updatePinButtonsInResults();
+        }
+        
+        function clearAllPins() {
+            if (confirm('Clear all pinned items?')) {
+                localStorage.removeItem('pinnedItems');
+                loadPins();
+                updatePinButtonsInResults();
+                alert('All pins cleared successfully!');
+            }
+        }
+        
+        function exportPins() {
+            const pins = JSON.parse(localStorage.getItem('pinnedItems') || '[]');
+            if (pins.length === 0) {
+                alert('No pins to export');
+                return;
+            }
+            
+            const dataStr = JSON.stringify(pins, null, 2);
+            const dataBlob = new Blob([dataStr], {type: 'application/json'});
+            const url = URL.createObjectURL(dataBlob);
+            const link = document.createElement('a');
+            link.href = url;
+            link.download = 'odoo-search-pins.json';
+            link.click();
+            URL.revokeObjectURL(url);
+        }
+        
+        function updatePinButtonsInResults() {
+            // Update all pin buttons in current search results
+            const pinButtons = document.querySelectorAll('.pin-btn');
+            pinButtons.forEach(button => {
+                const onclick = button.getAttribute('onclick');
+                if (onclick) {
+                    const match = onclick.match(/togglePin\('([^']+)', '([^']+)'/);
+                    if (match) {
+                        const itemId = match[1];
+                        const itemType = match[2];
+                        const isPinned = isItemPinned(itemId, itemType);
+                        
+                        if (isPinned) {
+                            button.textContent = '📌 Unpin';
+                            button.className = 'pin-btn pinned';
+                            button.title = '📌 Unpin';
+                        } else {
+                            button.textContent = '📌 Pin';
+                            button.className = 'pin-btn';
+                            button.title = '📌 Pin';
+                        }
+                    }
+                }
+            });
+        }
+        
+        function scrollToResults() {
+            const resultsElement = document.getElementById('results');
+            if (resultsElement) {
+                resultsElement.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            }
+        }
+        
         // Cache management
         function clearCache() {
             if (confirm('Clear all cached search results and search history?')) {
@@ -1488,9 +1842,13 @@ class WebSearchHandler(BaseHTTPRequestHandler):
         
         // Close modal when clicking outside
         window.onclick = function(event) {
-            const modal = document.getElementById('settingsModal');
-            if (event.target === modal) {
+            const settingsModal = document.getElementById('settingsModal');
+            const pinsModal = document.getElementById('pinsModal');
+            
+            if (event.target === settingsModal) {
                 closeSettings();
+            } else if (event.target === pinsModal) {
+                closePins();
             }
         }
     </script>
