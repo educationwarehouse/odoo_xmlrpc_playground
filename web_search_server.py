@@ -1475,7 +1475,7 @@ class WebSearchHandler(BaseHTTPRequestHandler):
         
         // Cache management
         function clearCache() {
-            if (confirm('Clear all cached search results?')) {
+            if (confirm('Clear all cached search results and search history?')) {
                 localStorage.removeItem('cachedSearchResults');
                 localStorage.removeItem('searchHistory');
                 loadSearchHistory();
