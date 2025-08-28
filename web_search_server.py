@@ -103,7 +103,7 @@ class WebSearchHandler(BaseHTTPRequestHandler):
                 return
 
             # Log search request to console
-            print(f"🔍 Async web search request: '{search_term}' (type: {search_type}, since: {since})")
+            print(f"🔍 Web search request: '{search_term}' (type: {search_type}, since: {since})")
 
             # Use class-level searcher instance to persist caches
             try:
@@ -115,7 +115,7 @@ class WebSearchHandler(BaseHTTPRequestHandler):
                 self.send_json_response({'error': f'Failed to connect to Odoo: {str(e)}'}, 500)
                 return
             
-            # Perform async search
+            # Perform search
             results = searcher.full_text_search(
                 search_term=search_term,
                 since=since,

@@ -27,8 +27,6 @@ import csv
 import html
 import base64
 import textwrap
-import asyncio
-import concurrent.futures
 from odoo_base import OdooBase
 
 
@@ -577,10 +575,6 @@ class OdooTextSearch(OdooBase):
 
     def _build_user_cache(self):
         """Build a cache of all users for efficient lookup"""
-        return asyncio.run(self._build_user_cache_async())
-
-    async def _build_user_cache_async(self):
-        """Build a cache of all users for efficient lookup (async)"""
         if self._user_cache_built:
             return
             
@@ -588,14 +582,8 @@ class OdooTextSearch(OdooBase):
             print("👥 Building user cache...")
         
         try:
-            # Get all users in thread pool to avoid blocking
-            loop = asyncio.get_event_loop()
-            with concurrent.futures.ThreadPoolExecutor() as executor:
-                users = await loop.run_in_executor(
-                    executor, 
-                    lambda: self.client['res.users'].search_records([])
-                )
-            
+            # Get all users
+            users = self.client['res.users'].search_records([])
             self.user_cache = {user.id: user.name for user in users}
             self._user_cache_built = True
             
@@ -646,10 +634,6 @@ class OdooTextSearch(OdooBase):
 
     def _build_message_cache(self):
         """Build a cache of all messages for efficient lookup"""
-        return asyncio.run(self._build_message_cache_async())
-
-    async def _build_message_cache_async(self):
-        """Build a cache of all messages for efficient lookup (async)"""
         if self._message_cache_built:
             return
             
@@ -657,14 +641,9 @@ class OdooTextSearch(OdooBase):
             print("💬 Building message cache...")
         
         try:
-            # Get all messages for projects and tasks in thread pool
-            loop = asyncio.get_event_loop()
-            with concurrent.futures.ThreadPoolExecutor() as executor:
-                domain = ['|', ('model', '=', 'project.project'), ('model', '=', 'project.task')]
-                messages = await loop.run_in_executor(
-                    executor,
-                    lambda: self.messages.search_records(domain)
-                )
+            # Get all messages for projects and tasks
+            domain = ['|', ('model', '=', 'project.project'), ('model', '=', 'project.task')]
+            messages = self.messages.search_records(domain)
             
             for message in messages:
                 message_data = {
@@ -754,358 +733,6 @@ class OdooTextSearch(OdooBase):
         
         return None
 
-    async def _search_projects_async(self, search_term, since=None, include_descriptions=True, limit=None):
-        """Async version of search_projects"""
-        if self.verbose:
-            print(f"🔍 Searching projects for: '{search_term}'")
-        else:
-            print(f"🔍 Searching projects...", end="", flush=True)
-        
-        try:
-            # Build domain for project search
-            domain = []
-            
-            # Time filter
-            if since:
-                domain.append(('write_date', '>=', since.strftime('%Y-%m-%d %H:%M:%S')))
-            
-            # Text search in name
-            name_domain = [('name', 'ilike', search_term)]
-            
-            if include_descriptions:
-                # Search in both name and description
-                text_domain = ['|', ('name', 'ilike', search_term), ('description', 'ilike', search_term)]
-            else:
-                text_domain = name_domain
-            
-            # Combine domains
-            if domain:
-                final_domain = ['&'] + domain + text_domain
-            else:
-                final_domain = text_domain
-            
-            if self.verbose:
-                print(f"🔧 Project domain: {final_domain}")
-            
-            # Apply limit at database level
-            search_kwargs = {}
-            if limit:
-                search_kwargs['limit'] = limit
-                search_kwargs['order'] = 'write_date desc'
-            
-            # Run search in thread pool
-            loop = asyncio.get_event_loop()
-            with concurrent.futures.ThreadPoolExecutor() as executor:
-                projects = await loop.run_in_executor(
-                    executor,
-                    lambda: self.projects.search_records(final_domain, **search_kwargs)
-                )
-            
-            if self.verbose:
-                print(f"📂 Found {len(projects)} matching projects")
-            else:
-                print(f" {len(projects)} found", flush=True)
-            
-            # Process results (this is fast, no need to async)
-            enriched_projects = []
-            for project in projects:
-                project_data = {
-                    'id': project.id,
-                    'name': project.name,
-                    'description': getattr(project, 'description', '') or '',
-                    'partner_id': project.partner_id.id if project.partner_id else None,
-                    'partner_name': project.partner_id.name if project.partner_id else 'No client',
-                    'user_id': project.user_id.id if project.user_id else None,
-                    'user_name': project.user_id.name if project.user_id else 'Unassigned',
-                    'create_date': str(project.create_date) if project.create_date else '',
-                    'write_date': str(project.write_date) if project.write_date else '',
-                    'stage_id': getattr(project, 'stage_id', None)
-                }
-                
-                # Cache this project for future lookups
-                self.project_cache[project.id] = project_data
-                
-                # Create enriched result
-                enriched_project = {
-                    'id': project_data['id'],
-                    'name': project_data['name'],
-                    'description': project_data['description'],
-                    'partner': project_data['partner_name'],
-                    'stage': project_data['stage_id'],
-                    'user': project_data['user_name'],
-                    'create_date': project_data['create_date'],
-                    'write_date': project_data['write_date'],
-                    'type': 'project',
-                    'search_term': search_term,
-                    'match_in_name': search_term.lower() in project_data['name'].lower(),
-                    'match_in_description': search_term.lower() in project_data['description'].lower()
-                }
-                enriched_projects.append(enriched_project)
-            
-            return enriched_projects
-            
-        except Exception as e:
-            print(f"❌ Error searching projects: {e}")
-            return []
-
-    async def _search_tasks_async(self, search_term, since=None, include_descriptions=True, project_ids=None, limit=None):
-        """Async version of search_tasks"""
-        if self.verbose:
-            print(f"🔍 Searching tasks for: '{search_term}'")
-        else:
-            print(f"🔍 Searching tasks...", end="", flush=True)
-        
-        try:
-            # Build domain for task search
-            domain = []
-            
-            # Time filter
-            if since:
-                domain.append(('write_date', '>=', since.strftime('%Y-%m-%d %H:%M:%S')))
-            
-            # Project filter
-            if project_ids:
-                domain.append(('project_id', 'in', project_ids))
-            
-            # Text search
-            if include_descriptions:
-                text_domain = ['|', ('name', 'ilike', search_term), ('description', 'ilike', search_term)]
-            else:
-                text_domain = [('name', 'ilike', search_term)]
-            
-            # Combine domains
-            if domain:
-                final_domain = domain + ['&'] + text_domain if len(domain) == 1 else domain + text_domain
-                # Properly structure the domain
-                if len(domain) == 1:
-                    final_domain = ['&'] + domain + text_domain
-                else:
-                    # Multiple conditions - build properly
-                    final_domain = domain[:]
-                    for condition in text_domain:
-                        final_domain = ['&'] + final_domain + [condition] if isinstance(condition, tuple) else final_domain + [condition]
-            else:
-                final_domain = text_domain
-            
-            if self.verbose:
-                print(f"🔧 Task domain: {final_domain}")
-            
-            # Apply limit at database level
-            search_kwargs = {}
-            if limit:
-                search_kwargs['limit'] = limit
-                search_kwargs['order'] = 'write_date desc'
-            
-            # Run search in thread pool
-            loop = asyncio.get_event_loop()
-            with concurrent.futures.ThreadPoolExecutor() as executor:
-                tasks = await loop.run_in_executor(
-                    executor,
-                    lambda: self.tasks.search_records(final_domain, **search_kwargs)
-                )
-            
-            if self.verbose:
-                print(f"📋 Found {len(tasks)} matching tasks")
-            else:
-                print(f" {len(tasks)} found", flush=True)
-            
-            # Process results
-            enriched_tasks = []
-            for task in tasks:
-                # Extract user ID safely
-                user_id = None
-                user_name = 'Unassigned'
-                
-                if hasattr(task, 'user_ids') and task.user_ids:
-                    try:
-                        if hasattr(task.user_ids, '__len__') and len(task.user_ids) > 0:
-                            first_user = task.user_ids[0]
-                            if hasattr(first_user, 'id'):
-                                user_id = first_user.id
-                                user_name = first_user.name if hasattr(first_user, 'name') else f'User {user_id}'
-                    except:
-                        pass
-                
-                # Get stage/status information
-                stage_name = 'No stage'
-                stage_id = None
-                if hasattr(task, 'stage_id') and task.stage_id:
-                    try:
-                        if hasattr(task.stage_id, 'name'):
-                            stage_name = task.stage_id.name
-                            stage_id = task.stage_id.id if hasattr(task.stage_id, 'id') else task.stage_id
-                        else:
-                            # stage_id might be just an ID, try to get the name
-                            stage_id = task.stage_id
-                            stage_name = f'Stage {stage_id}'
-                    except:
-                        stage_name = 'Stage (unavailable)'
-
-                # Cache task data
-                task_data = {
-                    'id': task.id,
-                    'name': task.name,
-                    'description': getattr(task, 'description', '') or '',
-                    'project_id': task.project_id.id if task.project_id else None,
-                    'project_name': task.project_id.name if task.project_id else 'No project',
-                    'user_id': user_id,
-                    'user_name': user_name,
-                    'create_date': str(task.create_date) if task.create_date else '',
-                    'write_date': str(task.write_date) if task.write_date else '',
-                    'stage_id': stage_id,
-                    'stage_name': stage_name,
-                    'priority': getattr(task, 'priority', '0')
-                }
-                
-                # Build project-task mapping (but don't cache task data since it changes frequently)
-                if task_data['project_id']:
-                    if task_data['project_id'] not in self.project_task_map:
-                        self.project_task_map[task_data['project_id']] = []
-                    if task.id not in self.project_task_map[task_data['project_id']]:
-                        self.project_task_map[task_data['project_id']].append(task.id)
-                    self.task_project_map[task.id] = task_data['project_id']
-                
-                # Create enriched result
-                enriched_task = {
-                    'id': task_data['id'],
-                    'name': task_data['name'],
-                    'description': task_data['description'],
-                    'project_name': task_data['project_name'],
-                    'project_id': task_data['project_id'],
-                    'stage': task_data['stage_name'],
-                    'stage_id': task_data['stage_id'],
-                    'user': task_data['user_name'],
-                    'priority': task_data['priority'],
-                    'create_date': task_data['create_date'],
-                    'write_date': task_data['write_date'],
-                    'type': 'task',
-                    'search_term': search_term,
-                    'match_in_name': search_term.lower() in task_data['name'].lower(),
-                    'match_in_description': search_term.lower() in task_data['description'].lower()
-                }
-                enriched_tasks.append(enriched_task)
-            
-            return enriched_tasks
-            
-        except Exception as e:
-            print(f"❌ Error searching tasks: {e}")
-            return []
-
-    async def _search_messages_async(self, search_term, since=None, model_type='both', limit=None):
-        """Async version of search_messages (uses cached data so already fast)"""
-        return self.search_messages(search_term, since, model_type, limit)
-
-    async def _search_files_async(self, search_term, since=None, file_types=None, model_type='both', limit=None):
-        """Async version of search_files"""
-        if self.verbose:
-            print(f"🔍 Searching files for: '{search_term}'")
-        else:
-            print(f"🔍 Searching files...", end="", flush=True)
-        
-        try:
-            # Build domain for file search
-            domain = []
-            
-            # Time filter
-            if since:
-                domain.append(('create_date', '>=', since.strftime('%Y-%m-%d %H:%M:%S')))
-            
-            # Model filter - get IDs from database for efficiency
-            if model_type != 'all':
-                # Get all project and task IDs directly from database in parallel
-                loop = asyncio.get_event_loop()
-                with concurrent.futures.ThreadPoolExecutor() as executor:
-                    # Run both queries concurrently
-                    project_task = await asyncio.gather(
-                        loop.run_in_executor(executor, lambda: self.projects.search_records([])),
-                        loop.run_in_executor(executor, lambda: self.tasks.search_records([]))
-                    )
-                    all_projects, all_tasks = project_task
-                
-                project_ids = [p.id for p in all_projects]
-                task_ids = [t.id for t in all_tasks]
-                
-                model_conditions = []
-                if model_type in ['projects', 'both'] and project_ids:
-                    model_conditions.append(['&', ('res_model', '=', 'project.project'), ('res_id', 'in', project_ids)])
-                if model_type in ['tasks', 'both'] and task_ids:
-                    model_conditions.append(['&', ('res_model', '=', 'project.task'), ('res_id', 'in', task_ids)])
-                
-                if len(model_conditions) == 2:
-                    model_domain = ['|'] + model_conditions[0] + model_conditions[1]
-                elif len(model_conditions) == 1:
-                    model_domain = model_conditions[0]
-                else:
-                    model_domain = []
-            else:
-                # Search all attachments regardless of model
-                model_domain = []
-            
-            # Text search in filename
-            text_domain = [('name', 'ilike', search_term)]
-            
-            # File type filter
-            if file_types:
-                type_conditions = []
-                for file_type in file_types:
-                    # Handle both with and without dot
-                    ext = file_type.lower().lstrip('.')
-                    type_conditions.append(('name', 'ilike', f'.{ext}'))
-                
-                if len(type_conditions) > 1:
-                    type_domain = ['|'] * (len(type_conditions) - 1) + type_conditions
-                else:
-                    type_domain = type_conditions
-            else:
-                type_domain = []
-            
-            # Combine all domains
-            final_domain = []
-            if domain:
-                final_domain.extend(domain)
-            if model_domain:
-                if final_domain:
-                    final_domain = ['&'] + final_domain + model_domain
-                else:
-                    final_domain = model_domain
-            if text_domain:
-                if final_domain:
-                    final_domain = ['&'] + final_domain + text_domain
-                else:
-                    final_domain = text_domain
-            if type_domain:
-                if final_domain:
-                    final_domain = ['&'] + final_domain + type_domain
-                else:
-                    final_domain = type_domain
-            
-            if self.verbose:
-                print(f"🔧 File domain: {final_domain}")
-            
-            # Apply limit at database level
-            search_kwargs = {}
-            if limit:
-                search_kwargs['limit'] = limit
-                search_kwargs['order'] = 'create_date desc'
-            
-            # Fetch files in thread pool
-            loop = asyncio.get_event_loop()
-            with concurrent.futures.ThreadPoolExecutor() as executor:
-                files = await loop.run_in_executor(
-                    executor,
-                    lambda: self.attachments.search_records(final_domain, **search_kwargs)
-                )
-            
-            if self.verbose:
-                print(f"📁 Found {len(files)} matching files")
-            else:
-                print(f" {len(files)} found", flush=True)
-            
-            return self._enrich_files_optimized(files, search_term)
-            
-        except Exception as e:
-            print(f"❌ Error searching files: {e}")
-            return []
 
     def _get_user_name(self, user_id):
         """Get user name from cache, with fallback"""
@@ -1143,28 +770,8 @@ class OdooTextSearch(OdooBase):
             file_types: List of file extensions to filter by
             limit: Maximum number of results per category
         """
-        # Run async search in sync context
-        return asyncio.run(self.full_text_search_async(
-            search_term, since, search_type, include_descriptions, 
-            include_logs, include_files, file_types, limit
-        ))
-
-    async def full_text_search_async(self, search_term, since=None, search_type='all', include_descriptions=True, include_logs=True, include_files=True, file_types=None, limit=None):
-        """
-        Asynchronous comprehensive text search across projects, tasks, logs, and files
-        
-        Args:
-            search_term: Text to search for
-            since: Time reference string (e.g., "1 week", "3 days")
-            search_type: 'all', 'projects', 'tasks', 'logs', 'files'
-            include_descriptions: Search in descriptions
-            include_logs: Search in log messages (default: True)
-            include_files: Search in file names and metadata (default: True)
-            file_types: List of file extensions to filter by
-            limit: Maximum number of results per category
-        """
         if self.verbose:
-            print(f"\n🚀 ASYNC FULL TEXT SEARCH")
+            print(f"\n🚀 FULL TEXT SEARCH")
             print(f"=" * 60)
             print(f"🔍 Search term: '{search_term}'")
             
@@ -1190,8 +797,8 @@ class OdooTextSearch(OdooBase):
                 since_date = self._parse_time_reference(since)
         
         # Build user and message caches upfront (messages don't change)
-        await self._build_user_cache_async()
-        await self._build_message_cache_async()
+        self._build_user_cache()
+        self._build_message_cache()
         # Projects will be cached on-demand, tasks are not cached (they change frequently)
         
         results = {
@@ -1202,74 +809,32 @@ class OdooTextSearch(OdooBase):
         }
         
         try:
-            # Create list of search tasks to run concurrently
-            search_tasks = []
-            
             # Search projects
             if search_type in ['all', 'projects']:
-                search_tasks.append(
-                    self._search_projects_async(search_term, since_date, include_descriptions, limit)
-                )
+                results['projects'] = self.search_projects(search_term, since_date, include_descriptions, limit)
+            
+            if self.verbose:
+                print()  # Add white line between searches
             
             # Search tasks
             if search_type in ['all', 'tasks']:
-                search_tasks.append(
-                    self._search_tasks_async(search_term, since_date, include_descriptions, None, limit)
-                )
+                results['tasks'] = self.search_tasks(search_term, since_date, include_descriptions, None, limit)
             
             # Search messages/logs
             if include_logs and search_type in ['all', 'logs']:
                 model_type = 'both' if search_type == 'all' else search_type
-                search_tasks.append(
-                    self._search_messages_async(search_term, since_date, model_type, limit)
-                )
+                results['messages'] = self.search_messages(search_term, since_date, model_type, limit)
             
             # Search files
             if include_files or search_type == 'files':
                 # Use 'all' for comprehensive file search when searching all or files specifically
                 model_type = 'all' if search_type in ['all', 'files'] else search_type
-                search_tasks.append(
-                    self._search_files_async(search_term, since_date, file_types, model_type, limit)
-                )
-            
-            # Run all searches concurrently
-            if search_tasks:
-                search_results = await asyncio.gather(*search_tasks, return_exceptions=True)
-                
-                # Process results
-                task_index = 0
-                if search_type in ['all', 'projects']:
-                    if isinstance(search_results[task_index], Exception):
-                        print(f"❌ Error in project search: {search_results[task_index]}")
-                    else:
-                        results['projects'] = search_results[task_index]
-                    task_index += 1
-                
-                if search_type in ['all', 'tasks']:
-                    if isinstance(search_results[task_index], Exception):
-                        print(f"❌ Error in task search: {search_results[task_index]}")
-                    else:
-                        results['tasks'] = search_results[task_index]
-                    task_index += 1
-                
-                if include_logs and search_type in ['all', 'logs']:
-                    if isinstance(search_results[task_index], Exception):
-                        print(f"❌ Error in message search: {search_results[task_index]}")
-                    else:
-                        results['messages'] = search_results[task_index]
-                    task_index += 1
-                
-                if include_files or search_type == 'files':
-                    if isinstance(search_results[task_index], Exception):
-                        print(f"❌ Error in file search: {search_results[task_index]}")
-                    else:
-                        results['files'] = search_results[task_index]
-                    task_index += 1
+                results['files'] = self.search_files(search_term, since_date, file_types, model_type, limit)
             
             return results
             
         except Exception as e:
-            print(f"❌ Error in async full text search: {e}")
+            print(f"❌ Error in full text search: {e}")
             return results
 
     def _enrich_projects(self, projects, search_term):
