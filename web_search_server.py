@@ -799,39 +799,67 @@ class WebSearchHandler(BaseHTTPRequestHandler):
             border-left: 4px solid var(--danger-color);
         }
         
-        .modal {
+        .tab-container {
+            margin-bottom: 20px;
+        }
+        
+        .tab-buttons {
+            display: flex;
+            gap: 2px;
+            background: var(--border-color);
+            border-radius: 8px;
+            padding: 4px;
+        }
+        
+        .tab-button {
+            flex: 1;
+            padding: 12px 20px;
+            border: none;
+            background: transparent;
+            color: var(--text-color);
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 500;
+            transition: all 0.3s;
+        }
+        
+        .tab-button:hover {
+            background: var(--card-bg);
+        }
+        
+        .tab-button.active {
+            background: var(--accent-color);
+            color: white;
+        }
+        
+        .tab-content {
             display: none;
-            position: fixed;
-            z-index: 1000;
-            left: 0;
-            top: 0;
-            width: 100%;
-            height: 100%;
-            background-color: rgba(0,0,0,0.5);
         }
         
-        .modal-content {
-            background-color: var(--bg-color);
-            margin: 5% auto;
-            padding: 30px;
+        .tab-content.active {
+            display: block;
+        }
+        
+        .pins-content, .settings-content {
+            background: var(--card-bg);
+            padding: 25px;
             border-radius: 12px;
-            width: 90%;
-            max-width: 500px;
-            box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+            box-shadow: var(--shadow);
         }
         
-        .pins-modal {
-            max-width: 800px;
-            max-height: 80vh;
-            overflow-y: auto;
+        .pins-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            padding-bottom: 15px;
+            border-bottom: 1px solid var(--border-color);
         }
         
         .pins-actions {
             display: flex;
             gap: 10px;
-            margin-bottom: 20px;
-            padding-bottom: 15px;
-            border-bottom: 1px solid var(--border-color);
         }
         
         .pins-container {
@@ -840,7 +868,7 @@ class WebSearchHandler(BaseHTTPRequestHandler):
         }
         
         .pin-item {
-            background: var(--card-bg);
+            background: var(--bg-color);
             border: 1px solid var(--border-color);
             border-radius: 8px;
             padding: 15px;
@@ -919,26 +947,6 @@ class WebSearchHandler(BaseHTTPRequestHandler):
             color: white;
         }
         
-        .modal-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: 20px;
-            padding-bottom: 10px;
-            border-bottom: 1px solid var(--border-color);
-        }
-        
-        .close {
-            color: #aaa;
-            font-size: 28px;
-            font-weight: bold;
-            cursor: pointer;
-        }
-        
-        .close:hover {
-            color: var(--text-color);
-        }
-        
         .theme-toggle {
             background: none;
             border: 1px solid var(--border-color);
@@ -962,6 +970,10 @@ class WebSearchHandler(BaseHTTPRequestHandler):
                 flex-direction: column;
                 gap: 15px;
                 text-align: center;
+            }
+            
+            .tab-buttons {
+                flex-direction: column;
             }
             
             .form-row {
@@ -990,6 +1002,17 @@ class WebSearchHandler(BaseHTTPRequestHandler):
                 flex-direction: column;
                 gap: 5px;
             }
+            
+            .pins-header {
+                flex-direction: column;
+                gap: 15px;
+                align-items: flex-start;
+            }
+            
+            .pins-actions {
+                flex-direction: column;
+                width: 100%;
+            }
         }
     </style>
 </head>
@@ -999,12 +1022,19 @@ class WebSearchHandler(BaseHTTPRequestHandler):
             <h1>🔍 Odoo Search</h1>
             <div class="header-controls">
                 <button class="theme-toggle" onclick="toggleTheme()" title="Toggle theme">🌓</button>
-                <button class="btn btn-secondary" onclick="openPins()">📌 Pins</button>
-                <button class="btn btn-secondary" onclick="openSettings()">⚙️ Settings</button>
             </div>
         </div>
         
-        <form class="search-form" onsubmit="performSearch(event)">
+        <div class="tab-container">
+            <div class="tab-buttons">
+                <button class="tab-button active" onclick="switchTab('search')">🔍 Search</button>
+                <button class="tab-button" onclick="switchTab('pins')">📌 Pins</button>
+                <button class="tab-button" onclick="switchTab('settings')">⚙️ Settings</button>
+            </div>
+        </div>
+        
+        <div id="search-tab" class="tab-content active">
+            <form class="search-form" onsubmit="performSearch(event)">
             <div class="form-row">
                 <div class="form-group">
                     <label for="searchTerm">Search Term</label>
@@ -1068,59 +1098,54 @@ class WebSearchHandler(BaseHTTPRequestHandler):
                 <label>Recent searches:</label>
                 <div id="historyItems"></div>
             </div>
-        </form>
-        
-        <div id="results" class="results"></div>
-    </div>
-    
-    <!-- Settings Modal -->
-    <div id="settingsModal" class="modal">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h2>Settings</h2>
-                <span class="close" onclick="closeSettings()">&times;</span>
-            </div>
-            <form onsubmit="saveSettings(event)">
-                <div class="form-group">
-                    <label for="odooHost">Odoo Host</label>
-                    <input type="text" id="odooHost" name="host" placeholder="your-instance.odoo.com">
-                </div>
-                <div class="form-group">
-                    <label for="odooDatabase">Database</label>
-                    <input type="text" id="odooDatabase" name="database" placeholder="your-database">
-                </div>
-                <div class="form-group">
-                    <label for="odooUser">User</label>
-                    <input type="email" id="odooUser" name="user" placeholder="user@domain.com">
-                </div>
-                <div class="form-group">
-                    <label for="odooPassword">Password/API Key</label>
-                    <input type="password" id="odooPassword" name="password" placeholder="Leave empty to keep current">
-                </div>
-                <div class="form-row">
-                    <button type="submit" class="btn btn-primary">💾 Save Settings</button>
-                    <button type="button" class="btn btn-secondary" onclick="closeSettings()">Cancel</button>
-                </div>
             </form>
+            
+            <div id="results" class="results"></div>
+        </div>
+        
+        <div id="pins-tab" class="tab-content">
+            <div class="pins-content">
+                <div class="pins-header">
+                    <h2>📌 Pinned Items</h2>
+                    <div class="pins-actions">
+                        <button type="button" class="btn btn-secondary" onclick="clearAllPins()">🗑️ Clear All Pins</button>
+                        <button type="button" class="btn btn-secondary" onclick="exportPins()">📤 Export Pins</button>
+                    </div>
+                </div>
+                <div id="pinsContainer" class="pins-container">
+                    <!-- Pinned items will be loaded here -->
+                </div>
+            </div>
+        </div>
+        
+        <div id="settings-tab" class="tab-content">
+            <div class="settings-content">
+                <h2>⚙️ Settings</h2>
+                <form onsubmit="saveSettings(event)">
+                    <div class="form-group">
+                        <label for="odooHost">Odoo Host</label>
+                        <input type="text" id="odooHost" name="host" placeholder="your-instance.odoo.com">
+                    </div>
+                    <div class="form-group">
+                        <label for="odooDatabase">Database</label>
+                        <input type="text" id="odooDatabase" name="database" placeholder="your-database">
+                    </div>
+                    <div class="form-group">
+                        <label for="odooUser">User</label>
+                        <input type="email" id="odooUser" name="user" placeholder="user@domain.com">
+                    </div>
+                    <div class="form-group">
+                        <label for="odooPassword">Password/API Key</label>
+                        <input type="password" id="odooPassword" name="password" placeholder="Leave empty to keep current">
+                    </div>
+                    <div class="form-row">
+                        <button type="submit" class="btn btn-primary">💾 Save Settings</button>
+                    </div>
+                </form>
+            </div>
         </div>
     </div>
     
-    <!-- Pins Modal -->
-    <div id="pinsModal" class="modal">
-        <div class="modal-content pins-modal">
-            <div class="modal-header">
-                <h2>📌 Pinned Items</h2>
-                <span class="close" onclick="closePins()">&times;</span>
-            </div>
-            <div class="pins-actions">
-                <button type="button" class="btn btn-secondary" onclick="clearAllPins()">🗑️ Clear All Pins</button>
-                <button type="button" class="btn btn-secondary" onclick="exportPins()">📤 Export Pins</button>
-            </div>
-            <div id="pinsContainer" class="pins-container">
-                <!-- Pinned items will be loaded here -->
-            </div>
-        </div>
-    </div>
     
     <script>
         // Theme management
@@ -1267,14 +1292,28 @@ class WebSearchHandler(BaseHTTPRequestHandler):
             displayResults(data);
         }
         
-        // Settings management
-        function openSettings() {
-            document.getElementById('settingsModal').style.display = 'block';
-            loadSettings();
-        }
-        
-        function closeSettings() {
-            document.getElementById('settingsModal').style.display = 'none';
+        // Tab management
+        function switchTab(tabName) {
+            // Hide all tab contents
+            const tabContents = document.querySelectorAll('.tab-content');
+            tabContents.forEach(tab => tab.classList.remove('active'));
+            
+            // Remove active class from all tab buttons
+            const tabButtons = document.querySelectorAll('.tab-button');
+            tabButtons.forEach(button => button.classList.remove('active'));
+            
+            // Show selected tab content
+            document.getElementById(tabName + '-tab').classList.add('active');
+            
+            // Add active class to selected tab button
+            event.target.classList.add('active');
+            
+            // Load content for specific tabs
+            if (tabName === 'pins') {
+                loadPins();
+            } else if (tabName === 'settings') {
+                loadSettings();
+            }
         }
         
         function loadSettings() {
@@ -1307,7 +1346,6 @@ class WebSearchHandler(BaseHTTPRequestHandler):
             .then(data => {
                 if (data.success) {
                     alert('Settings saved successfully!');
-                    closeSettings();
                 } else {
                     alert('Error saving settings: ' + data.error);
                 }
@@ -1611,15 +1649,6 @@ class WebSearchHandler(BaseHTTPRequestHandler):
             return div.innerHTML;
         }
         
-        // Pins management
-        function openPins() {
-            document.getElementById('pinsModal').style.display = 'block';
-            loadPins();
-        }
-        
-        function closePins() {
-            document.getElementById('pinsModal').style.display = 'none';
-        }
         
         function loadPins() {
             const pins = JSON.parse(localStorage.getItem('pinnedItems') || '[]');
@@ -1839,18 +1868,6 @@ class WebSearchHandler(BaseHTTPRequestHandler):
         
         // Initialize
         loadSearchHistory();
-        
-        // Close modal when clicking outside
-        window.onclick = function(event) {
-            const settingsModal = document.getElementById('settingsModal');
-            const pinsModal = document.getElementById('pinsModal');
-            
-            if (event.target === settingsModal) {
-                closeSettings();
-            } else if (event.target === pinsModal) {
-                closePins();
-            }
-        }
     </script>
 </body>
 </html>"""
