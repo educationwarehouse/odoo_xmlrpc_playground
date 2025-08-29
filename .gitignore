@@ -1,2 +1,5 @@
 .aider*
 .env
+.idea 
+*.pyc
+__pycache__
