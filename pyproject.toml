@@ -50,7 +50,7 @@ odoo = "edwh_odoo_plugin.odoo_plugin"
 path = "src/edwh_odoo_plugin/__about__.py"
 
 [tool.semantic_release]
-branch = "master"
+branch = "main"
 version_variable = "src/edwh_odoo_plugin/__about__.py:__version__"
 change_log = "CHANGELOG.md"
 upload_to_repository = false
