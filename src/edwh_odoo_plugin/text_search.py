@@ -150,10 +150,14 @@ class OdooTextSearch(OdooBase):
             # Cache found projects for future use
             enriched_projects = []
             for project in projects:
+                # Convert description to markdown
+                raw_description = getattr(project, 'description', '') or ''
+                markdown_description = self.html_to_markdown(raw_description) if raw_description else ''
+                
                 project_data = {
                     'id': project.id,
                     'name': project.name,
-                    'description': getattr(project, 'description', '') or '',
+                    'description': markdown_description,
                     'partner_id': project.partner_id.id if project.partner_id else None,
                     'partner_name': project.partner_id.name if project.partner_id else 'No client',
                     'user_id': project.user_id.id if project.user_id else None,
@@ -337,10 +341,14 @@ class OdooTextSearch(OdooBase):
             # Cache found messages for future use
             matching_messages = []
             for message in messages:
+                # Convert body to markdown
+                raw_body = getattr(message, 'body', '') or ''
+                markdown_body = self.html_to_markdown(raw_body) if raw_body else ''
+                
                 message_data = {
                     'id': message.id,
                     'subject': getattr(message, 'subject', '') or 'No subject',
-                    'body': getattr(message, 'body', '') or '',
+                    'body': markdown_body,
                     'author': message.author_id.name if message.author_id else 'System',
                     'date': str(message.date) if message.date else '',
                     'model': message.model,
