@@ -16,6 +16,12 @@ Date: August 2025
 import os
 import re
 from odoo_base import OdooBase
+import warnings
+
+# Suppress the pkg_resources deprecation warning from odoo_rpc_client globally
+warnings.filterwarnings("ignore", 
+                      message="pkg_resources is deprecated as an API.*",
+                      category=UserWarning)
 
 
 class UserDebugTool(OdooBase):

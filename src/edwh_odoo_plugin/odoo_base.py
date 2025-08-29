@@ -14,6 +14,12 @@ import os
 from dotenv import load_dotenv
 from openerp_proxy import Client
 from openerp_proxy.ext.all import *
+import warnings
+
+# Suppress the pkg_resources deprecation warning from odoo_rpc_client globally
+warnings.filterwarnings("ignore", 
+                      message="pkg_resources is deprecated as an API.*",
+                      category=UserWarning)
 
 
 class OdooBase:

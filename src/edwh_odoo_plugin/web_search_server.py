@@ -37,6 +37,12 @@ from urllib.parse import urlparse, parse_qs, unquote
 import base64
 import mimetypes
 import time
+import warnings
+
+# Suppress the pkg_resources deprecation warning from odoo_rpc_client globally
+warnings.filterwarnings("ignore", 
+                      message="pkg_resources is deprecated as an API.*",
+                      category=UserWarning)
 
 
 class WebSearchHandler(BaseHTTPRequestHandler):

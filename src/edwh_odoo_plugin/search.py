@@ -32,6 +32,12 @@ import base64
 import csv
 from datetime import datetime, timedelta
 from odoo_base import OdooBase, create_env_file
+import warnings
+
+# Suppress the pkg_resources deprecation warning from odoo_rpc_client globally
+warnings.filterwarnings("ignore", 
+                      message="pkg_resources is deprecated as an API.*",
+                      category=UserWarning)
 
 
 class OdooProjectFileSearchFinal(OdooBase):
