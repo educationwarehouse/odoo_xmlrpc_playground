@@ -168,29 +168,15 @@ def setup(c: Context,
         print("=" * 50)
     
     try:
-        dotenv_path = Path(".env")
-        if not dotenv_path.exists():
-            dotenv_path.touch()
-        
-        # Check for existing Odoo configuration
-        existing_url = os.getenv("ODOO_URL")
-        existing_db = os.getenv("ODOO_DB")
-        existing_user = os.getenv("ODOO_USER")
-        
-        if existing_url and existing_db and existing_user:
-            if verbose:
-                print("✅ Odoo configuration already exists:")
-                print(f"   URL: {existing_url}")
-                print(f"   Database: {existing_db}")
-                print(f"   User: {existing_user}")
-            
-            if not edwh.confirm("Odoo configuration already exists. Do you want to reconfigure? [yN] "):
-                print("✅ Using existing Odoo configuration")
-                return {
-                    'success': True,
-                    'message': 'Using existing Odoo configuration'
-                }
-        
+        if (cwd_dotenv := Path.cwd() / '.env').exists():
+            # check local first
+            dotenv_path = cwd_dotenv
+        else:
+            # default to plugin folder as an escape
+            dotenv_path = Path.home() / ".config/edwh/edwh_odoo_plugin.env"
+            if not dotenv_path.exists():
+                dotenv_path.touch()
+
         # Interactive setup for Odoo connection
         print("\n📋 Odoo Connection Setup")
         print("Please provide your Odoo connection details:")
