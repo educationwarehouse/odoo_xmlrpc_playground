@@ -36,9 +36,34 @@ class OdooBase:
 
     def __init__(self, verbose=False):
         """Initialize with .env configuration"""
-        load_dotenv()
+        from pathlib import Path
         
         self.verbose = verbose
+
+        # Check for .env files in expected locations
+        cwd_dotenv = Path.cwd() / '.env'
+        config_dotenv = Path.home() / ".config/edwh/edwh_odoo_plugin.env"
+        
+        env_file_found = None
+        if cwd_dotenv.exists():
+            env_file_found = cwd_dotenv
+            if self.verbose:
+                print(f"📁 Loading configuration from: {cwd_dotenv.absolute()}")
+        elif config_dotenv.exists():
+            env_file_found = config_dotenv
+            if self.verbose:
+                print(f"📁 Loading configuration from: {config_dotenv.absolute()}")
+        
+        if env_file_found:
+            load_dotenv(env_file_found)
+        else:
+            print(f"❌ No .env configuration file found!")
+            print(f"   Searched in:")
+            print(f"   1. {cwd_dotenv.absolute()}")
+            print(f"   2. {config_dotenv.absolute()}")
+            print(f"")
+            print(f"   Please run: edwh odoo.setup")
+            raise FileNotFoundError("No .env configuration file found. Run 'edwh odoo.setup' to create one.")
 
         self.host = os.getenv('ODOO_HOST')
         self.database = os.getenv('ODOO_DATABASE')
@@ -48,7 +73,18 @@ class OdooBase:
         self.protocol = os.getenv('ODOO_PROTOCOL', 'xml-rpcs')
 
         if not all([self.host, self.database, self.user, self.password]):
-            raise ValueError("❌ Configuration incomplete! Check your .env file.")
+            missing_vars = []
+            if not self.host: missing_vars.append('ODOO_HOST')
+            if not self.database: missing_vars.append('ODOO_DATABASE')
+            if not self.user: missing_vars.append('ODOO_USER')
+            if not self.password: missing_vars.append('ODOO_PASSWORD')
+            
+            print(f"❌ Configuration incomplete!")
+            print(f"   Missing required variables: {', '.join(missing_vars)}")
+            print(f"   Configuration file: {env_file_found.absolute()}")
+            print(f"")
+            print(f"   Please run: edwh odoo.setup")
+            raise ValueError(f"Missing required configuration variables: {', '.join(missing_vars)}. Run 'edwh odoo.setup' to configure.")
 
         # Build base URL for links
         self.base_url = f"https://{self.host}"

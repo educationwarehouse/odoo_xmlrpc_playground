@@ -31,7 +31,7 @@ import os
 import base64
 import csv
 from datetime import datetime, timedelta
-from odoo_base import OdooBase
+from .odoo_base import OdooBase
 import warnings
 
 # Suppress the pkg_resources deprecation warning from odoo_rpc_client globally
