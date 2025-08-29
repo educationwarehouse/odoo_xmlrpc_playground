@@ -31,7 +31,7 @@ import os
 import base64
 import csv
 from datetime import datetime, timedelta
-from odoo_base import OdooBase, create_env_file
+from odoo_base import OdooBase
 import warnings
 
 # Suppress the pkg_resources deprecation warning from odoo_rpc_client globally
@@ -583,10 +583,6 @@ def main():
     """
     print("🚀 Odoo Project Bestand Zoeker - DEFINITIEVE VERSIE")
     print("=" * 70)
-
-    # Check .env
-    if not create_env_file():
-        return
 
     try:
         # Initialiseer zoeker
