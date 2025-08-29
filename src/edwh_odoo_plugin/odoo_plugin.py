@@ -143,6 +143,52 @@ def search(c: Context,
 
 @task(
     help={
+        'verbose': 'Show detailed setup information'
+    },
+    hookable=True
+)
+def setup(c: Context,
+          verbose=False):
+    """
+    Setup Odoo Plugin - Create .env configuration file
+    
+    Examples:
+        edwh odoo.setup
+        edwh odoo.setup --verbose
+    """
+    from .odoo_base import create_env_file
+    
+    if verbose:
+        print("🚀 Setting up Odoo Plugin")
+        print("=" * 50)
+    
+    try:
+        # Run the setup
+        create_env_file()
+        
+        print(f"✅ Setup completed successfully!")
+        
+        # Return success state for hookable tasks
+        return {
+            'success': True,
+            'message': 'Setup completed successfully'
+        }
+        
+    except Exception as e:
+        print(f"❌ Setup error: {e}")
+        if verbose:
+            import traceback
+            print(f"   Traceback: {traceback.format_exc()}")
+        
+        # Return error state for hookable tasks
+        return {
+            'success': False,
+            'error': str(e)
+        }
+
+
+@task(
+    help={
         'host': 'Host to bind to (default: localhost)',
         'port': 'Port to bind to (default: 1900)',
         'browser': 'Open browser automatically (default: False)',
