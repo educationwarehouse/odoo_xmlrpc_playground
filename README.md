@@ -1,6 +1,52 @@
-# Odoo XMLRPC Playground
+# EDWH Odoo Plugin
 
-Dit is een experimenteer plek om toegang via XMLRPC te krijgen tot odoo en daar ook echt iets mee te kunnen.
+[![PyPI - Version](https://img.shields.io/pypi/v/edwh-odoo-plugin.svg)](https://pypi.org/project/edwh-odoo-plugin)
+[![PyPI - Python Version](https://img.shields.io/pypi/pyversions/edwh-odoo-plugin.svg)](https://pypi.org/project/edwh-odoo-plugin)
+
+An EDWH plugin for Odoo XMLRPC operations, providing advanced search functionality for projects, tasks, logs, and files.
+
+## Installation
+
+This plugin is designed to work with the [EDWH](https://github.com/educationwarehouse/edwh) task runner system.
+
+### Install EDWH
+
+First, install EDWH using pipx (recommended):
+
+```bash
+pipx install edwh
+```
+
+For more information about EDWH installation and usage, see the [EDWH README](https://github.com/educationwarehouse/edwh).
+
+### Install this Plugin
+
+```bash
+# Install from PyPI (when published)
+pipx inject edwh edwh-odoo-plugin
+
+# Or install from source
+pipx inject edwh .
+
+# Or install with EDWH plugin manager
+edwh plugin.add edwh-odoo-plugin
+```
+
+### Verify Installation
+
+```bash
+edwh --help
+# You should see 'odoo' in the available namespaces
+
+edwh odoo --help
+# Shows available odoo commands
+```
+
+## Plugin Information
+
+- **pip name**: `edwh-odoo-plugin`
+- **plugin name**: `edwh[odoo]` (when available)
+- **subcommand namespace**: `odoo`
 
 ## Tools
 
