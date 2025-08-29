@@ -213,20 +213,20 @@ def setup(c: Context,
             comment="Odoo username/email"
         )
         
-        odoo_password = edwh.check_env(
-            key="ODOO_PASSWORD",
+        # API key is required for authentication
+        odoo_api_key = edwh.check_env(
+            key="ODOO_API_KEY",
             default="",
-            comment="Odoo password (will be hidden in .env file)"
+            comment="Odoo API key (required for authentication)"
         )
         
-        # Optional: API key for newer Odoo versions
-        use_api_key = edwh.confirm("Do you want to use an API key instead of password? [yN] ")
-        if use_api_key:
-            odoo_api_key = edwh.check_env(
-                key="ODOO_API_KEY",
-                default="",
-                comment="Odoo API key (recommended for production)"
-            )
+        if not odoo_api_key:
+            print("❌ Error: API key is required for Odoo authentication")
+            print("   Please generate an API key in your Odoo user preferences")
+            return {
+                'success': False,
+                'error': 'API key is required'
+            }
         
         # Test connection
         if verbose:
