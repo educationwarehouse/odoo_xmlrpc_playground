@@ -564,22 +564,22 @@ except Exception as e:
                 self.send_json_response({'error': 'File ID is required'}, 400)
                 return
             
-            # Create temporary searcher for download (downloads are infrequent)
+            # Create temporary base connection for download (downloads are infrequent)
             try:
                 try:
-                    from .text_search import OdooTextSearch
+                    from .odoo_base import OdooBase
                 except ImportError:
                     try:
-                        from edwh_odoo_plugin.text_search import OdooTextSearch
+                        from edwh_odoo_plugin.odoo_base import OdooBase
                     except ImportError:
-                        from text_search import OdooTextSearch
-                searcher = OdooTextSearch(verbose=False)
+                        from odoo_base import OdooBase
+                odoo_base = OdooBase(verbose=False)
             except Exception as e:
                 self.send_json_response({'error': f'Failed to connect to Odoo: {str(e)}'}, 500)
                 return
             
             # Get file info first
-            attachment_records = searcher.attachments.search_records([('id', '=', int(file_id))])
+            attachment_records = odoo_base.attachments.search_records([('id', '=', int(file_id))])
             
             if not attachment_records:
                 self.send_json_response({'error': 'File not found'}, 404)
@@ -588,7 +588,7 @@ except Exception as e:
             attachment = attachment_records[0]
             file_name = getattr(attachment, 'name', f'file_{file_id}')
             
-            # Get file data
+            # Get file data using shared method
             if not hasattr(attachment, 'datas'):
                 self.send_json_response({'error': 'No data available for this file'}, 404)
                 return

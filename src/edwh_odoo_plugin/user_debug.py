@@ -15,7 +15,7 @@ Date: August 2025
 
 import os
 import re
-from odoo_base import OdooBase
+from .odoo_base import OdooBase
 import warnings
 
 # Suppress the pkg_resources deprecation warning from odoo_rpc_client globally
@@ -98,7 +98,16 @@ class UserDebugTool(OdooBase):
             task = self.tasks.browse(task_id)
             print(f"Task: {task.name}")
             
-            # Test all possible user field names
+            # Use shared user extraction method
+            print(f"\n--- Using shared user extraction method ---")
+            try:
+                user_id, user_name = self.extract_user_from_task(task)
+                print(f"  ✅ Extracted user ID: {user_id}")
+                print(f"  ✅ Extracted user name: {user_name}")
+            except Exception as extract_error:
+                print(f"  ❌ Error with shared extraction: {extract_error}")
+            
+            # Test all possible user field names for comparison
             user_fields = ['user_id', 'user_ids', 'assigned_user_id', 'responsible_user_id', 
                           'assignee_id', 'owner_id', 'create_uid', 'write_uid']
             

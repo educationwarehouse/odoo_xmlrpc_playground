@@ -11,6 +11,10 @@ Date: August 2025
 """
 
 import os
+import re
+import base64
+import html
+from pathlib import Path
 from dotenv import load_dotenv
 from openerp_proxy import Client
 from openerp_proxy.ext.all import *
@@ -20,6 +24,122 @@ import warnings
 warnings.filterwarnings("ignore", 
                       message="pkg_resources is deprecated as an API.*",
                       category=UserWarning)
+
+
+class ConfigManager:
+    """Centralized configuration management"""
+    
+    @staticmethod
+    def get_config_path():
+        """Get the standard config file path"""
+        return Path.home() / ".config/edwh/edwh_odoo_plugin.env"
+    
+    @staticmethod
+    def load_config(verbose=False):
+        """Load configuration with validation"""
+        config_path = ConfigManager.get_config_path()
+        
+        if not config_path.exists():
+            print(f"❌ No configuration file found!")
+            print(f"   Expected location: {config_path.absolute()}")
+            print(f"")
+            print(f"   Please run: edwh odoo.setup")
+            raise FileNotFoundError("No configuration file found. Run 'edwh odoo.setup' to create one.")
+        
+        load_dotenv(config_path)
+        
+        if verbose:
+            print(f"📁 Loading configuration from: {config_path.absolute()}")
+        
+        config = {
+            'host': os.getenv('ODOO_HOST'),
+            'database': os.getenv('ODOO_DATABASE'),
+            'user': os.getenv('ODOO_USER'),
+            'password': os.getenv('ODOO_PASSWORD'),
+            'port': int(os.getenv('ODOO_PORT', '443')),
+            'protocol': os.getenv('ODOO_PROTOCOL', 'xml-rpcs')
+        }
+        
+        missing = [k for k, v in config.items() if not v and k != 'port']
+        if missing:
+            print(f"❌ Configuration incomplete!")
+            print(f"   Missing required variables: {', '.join(missing)}")
+            print(f"   Configuration file: {config_path.absolute()}")
+            print(f"")
+            print(f"   Please run: edwh odoo.setup")
+            raise ValueError(f"Missing required configuration variables: {', '.join(missing)}. Run 'edwh odoo.setup' to configure.")
+        
+        return config
+
+
+class DomainBuilder:
+    """Utility class for building Odoo search domains"""
+    
+    @staticmethod
+    def combine_with_and(base_domain, *additional_conditions):
+        """Combine domain with additional conditions using AND"""
+        domain = base_domain[:]
+        for condition in additional_conditions:
+            if condition:
+                domain = ['&'] + domain + [condition]
+        return domain
+    
+    @staticmethod
+    def combine_with_or(*domains):
+        """Combine multiple domains with OR"""
+        valid_domains = [d for d in domains if d]
+        if len(valid_domains) == 1:
+            return valid_domains[0]
+        elif len(valid_domains) == 2:
+            return ['|'] + valid_domains[0] + valid_domains[1]
+        elif len(valid_domains) > 2:
+            # Build nested OR structure
+            result = valid_domains[0]
+            for domain in valid_domains[1:]:
+                result = ['|'] + result + domain
+            return result
+        return []
+    
+    @staticmethod
+    def text_search_domain(search_term, fields, include_descriptions=True):
+        """Build text search domain for multiple fields"""
+        if not include_descriptions:
+            fields = [f for f in fields if 'description' not in f]
+        
+        if len(fields) == 1:
+            return [(fields[0], 'ilike', search_term)]
+        else:
+            conditions = [(field, 'ilike', search_term) for field in fields]
+            return ['|'] * (len(conditions) - 1) + conditions
+    
+    @staticmethod
+    def date_filter_domain(since_date, date_field='write_date'):
+        """Build date filter domain"""
+        if since_date:
+            return [(date_field, '>=', since_date.strftime('%Y-%m-%d %H:%M:%S'))]
+        return []
+
+
+class ErrorHandler:
+    """Standardized error handling"""
+    
+    @staticmethod
+    def handle_search_error(operation, error, verbose=False):
+        """Standard error handling for search operations"""
+        print(f"❌ Error in {operation}: {error}")
+        if verbose:
+            import traceback
+            print(f"   Traceback: {traceback.format_exc()}")
+        return []
+    
+    @staticmethod
+    def handle_connection_error(error, verbose=False):
+        """Standard error handling for connection issues"""
+        print(f"❌ Connection failed: {error}")
+        if verbose:
+            import traceback
+            print(f"   Traceback: {traceback.format_exc()}")
+        raise
 
 
 class OdooBase:
@@ -32,48 +152,22 @@ class OdooBase:
     - Model shortcuts
     - URL generation
     - File size formatting
+    - Shared utilities for user extraction, task enrichment, etc.
     """
 
     def __init__(self, verbose=False):
         """Initialize with .env configuration"""
-        from pathlib import Path
-        
         self.verbose = verbose
-
-        # Only use config directory location
-        config_dotenv = Path.home() / ".config/edwh/edwh_odoo_plugin.env"
         
-        if config_dotenv.exists():
-            load_dotenv(config_dotenv)
-            if self.verbose:
-                print(f"📁 Loading configuration from: {config_dotenv.absolute()}")
-        else:
-            print(f"❌ No configuration file found!")
-            print(f"   Expected location: {config_dotenv.absolute()}")
-            print(f"")
-            print(f"   Please run: edwh odoo.setup")
-            raise FileNotFoundError("No configuration file found. Run 'edwh odoo.setup' to create one.")
-
-        self.host = os.getenv('ODOO_HOST')
-        self.database = os.getenv('ODOO_DATABASE')
-        self.user = os.getenv('ODOO_USER')
-        self.password = os.getenv('ODOO_PASSWORD')
-        self.port = int(os.getenv('ODOO_PORT', '443'))
-        self.protocol = os.getenv('ODOO_PROTOCOL', 'xml-rpcs')
-
-        if not all([self.host, self.database, self.user, self.password]):
-            missing_vars = []
-            if not self.host: missing_vars.append('ODOO_HOST')
-            if not self.database: missing_vars.append('ODOO_DATABASE')
-            if not self.user: missing_vars.append('ODOO_USER')
-            if not self.password: missing_vars.append('ODOO_PASSWORD')
-            
-            print(f"❌ Configuration incomplete!")
-            print(f"   Missing required variables: {', '.join(missing_vars)}")
-            print(f"   Configuration file: {config_dotenv.absolute()}")
-            print(f"")
-            print(f"   Please run: edwh odoo.setup")
-            raise ValueError(f"Missing required configuration variables: {', '.join(missing_vars)}. Run 'edwh odoo.setup' to configure.")
+        # Load configuration using centralized manager
+        config = ConfigManager.load_config(verbose)
+        
+        self.host = config['host']
+        self.database = config['database']
+        self.user = config['user']
+        self.password = config['password']
+        self.port = config['port']
+        self.protocol = config['protocol']
 
         # Build base URL for links
         self.base_url = f"https://{self.host}"
@@ -108,8 +202,261 @@ class OdooBase:
             self.messages = self.client['mail.message']
 
         except Exception as e:
-            print(f"❌ Connection failed: {e}")
-            raise
+            ErrorHandler.handle_connection_error(e, self.verbose)
+
+    def extract_user_from_task(self, task):
+        """Extract user ID and name from task using multiple field strategies"""
+        user_id = None
+        user_name = 'Unassigned'
+        
+        # Try user fields in order of reliability
+        for field_name in ['user_ids', 'create_uid', 'write_uid', 'user_id', 'assigned_user_id']:
+            try:
+                if hasattr(task, field_name):
+                    user_field = getattr(task, field_name, None)
+                    if user_field:
+                        # Handle RecordList (user_ids field)
+                        if hasattr(user_field, '__len__') and len(user_field) > 0:
+                            first_user = user_field[0]
+                            if hasattr(first_user, 'id'):
+                                user_id = first_user.id
+                                if self.verbose:
+                                    print(f"🔍 Found user ID {user_id} via {field_name}[0].id")
+                                break
+                        # Handle direct Record objects
+                        elif hasattr(user_field, 'id') and not str(user_field).startswith('functools.partial'):
+                            user_id = user_field.id
+                            if self.verbose:
+                                print(f"🔍 Found user ID {user_id} via {field_name}.id")
+                            break
+                        # Handle integer IDs
+                        elif isinstance(user_field, int):
+                            user_id = user_field
+                            if self.verbose:
+                                print(f"🔍 Found user ID {user_id} via {field_name} (int)")
+                            break
+                        # Handle partial objects (but skip if they return task ID)
+                        elif str(user_field).startswith('functools.partial'):
+                            partial_str = str(user_field)
+                            id_match = re.search(r'\[(\d+)\]', partial_str)
+                            if id_match:
+                                extracted_id = int(id_match.group(1))
+                                if extracted_id != task.id:  # Skip if matches task ID
+                                    user_id = extracted_id
+                                    if self.verbose:
+                                        print(f"🔍 Extracted user ID {user_id} from partial object")
+                                    break
+                                elif self.verbose:
+                                    print(f"⚠️ Extracted ID {extracted_id} matches task ID, skipping user field {field_name}")
+            except Exception as field_error:
+                if self.verbose:
+                    print(f"⚠️ Error accessing field {field_name}: {field_error}")
+                continue
+        
+        # Get user name from cache or direct lookup
+        if user_id and isinstance(user_id, int):
+            user_name = self._get_user_name(user_id)
+        
+        return user_id, user_name
+
+    def enrich_task_data(self, task, search_term=None):
+        """Unified task data enrichment"""
+        # Handle functools.partial objects
+        if hasattr(task, 'id') and not hasattr(task, 'name'):
+            task = self.tasks.browse(task.id)
+        
+        # Extract user info
+        user_id, user_name = self.extract_user_from_task(task)
+        
+        # Extract project info
+        project_name = 'No project'
+        project_id = None
+        if hasattr(task, 'project_id') and task.project_id:
+            try:
+                project_name = task.project_id.name if hasattr(task.project_id, 'name') else f'Project {task.project_id.id}'
+                project_id = task.project_id.id if hasattr(task.project_id, 'id') else task.project_id
+            except:
+                project_name = 'Project (unavailable)'
+        
+        # Extract stage info
+        stage_name = 'No stage'
+        stage_id = None
+        if hasattr(task, 'stage_id') and task.stage_id:
+            try:
+                if hasattr(task.stage_id, 'name'):
+                    stage_name = task.stage_id.name
+                    stage_id = task.stage_id.id if hasattr(task.stage_id, 'id') else task.stage_id
+                else:
+                    stage_id = task.stage_id
+                    stage_name = f'Stage {stage_id}'
+            except:
+                stage_name = 'Stage (unavailable)'
+        
+        enriched_data = {
+            'id': task.id,
+            'name': getattr(task, 'name', f'Task {task.id}'),
+            'description': getattr(task, 'description', '') or '',
+            'project_name': project_name,
+            'project_id': project_id,
+            'stage': stage_name,
+            'stage_id': stage_id,
+            'user': user_name,
+            'user_id': user_id,
+            'priority': getattr(task, 'priority', '0'),
+            'create_date': str(getattr(task, 'create_date', '')) if getattr(task, 'create_date', None) else '',
+            'write_date': str(getattr(task, 'write_date', '')) if getattr(task, 'write_date', None) else '',
+            'type': 'task'
+        }
+        
+        if search_term:
+            enriched_data.update({
+                'search_term': search_term,
+                'match_in_name': search_term.lower() in enriched_data['name'].lower(),
+                'match_in_description': search_term.lower() in enriched_data['description'].lower()
+            })
+        
+        return enriched_data
+
+    def download_attachment(self, attachment_id, output_path):
+        """Unified file download method"""
+        try:
+            attachment_records = self.attachments.search_records([('id', '=', attachment_id)])
+            
+            if not attachment_records:
+                if self.verbose:
+                    print(f"❌ File with ID {attachment_id} not found")
+                return False
+            
+            attachment = attachment_records[0]
+            file_name = getattr(attachment, 'name', f'file_{attachment_id}')
+            
+            if not hasattr(attachment, 'datas'):
+                if self.verbose:
+                    print(f"❌ No data field available for file {file_name}")
+                return False
+            
+            # Get file data
+            file_data_b64 = attachment.datas
+            if hasattr(file_data_b64, '__call__'):
+                file_data_b64 = file_data_b64()
+            
+            if not file_data_b64:
+                if self.verbose:
+                    print(f"❌ No data available for file {file_name}")
+                return False
+            
+            file_data = base64.b64decode(file_data_b64)
+            
+            # Handle output path
+            if output_path.endswith('/') or os.path.isdir(output_path):
+                output_path = os.path.join(output_path, file_name)
+            elif not os.path.basename(output_path):
+                output_path = os.path.join(output_path, file_name)
+            
+            os.makedirs(os.path.dirname(output_path), exist_ok=True)
+            
+            with open(output_path, 'wb') as f:
+                f.write(file_data)
+            
+            if self.verbose:
+                print(f"✅ Downloaded: {file_name}")
+                print(f"   To: {output_path}")
+                print(f"   Size: {len(file_data)} bytes")
+            
+            return True
+            
+        except Exception as e:
+            if self.verbose:
+                print(f"❌ Download failed: {e}")
+            return False
+
+    def html_to_markdown(self, html_content):
+        """
+        Convert HTML content to readable markdown-like text
+        
+        Args:
+            html_content: HTML string to convert
+            
+        Returns:
+            Cleaned markdown-like text
+        """
+        if not html_content:
+            return ""
+        
+        # Unescape HTML entities first
+        text = html.unescape(html_content)
+        
+        # Convert common HTML tags to markdown equivalents
+        conversions = [
+            # Headers
+            (r'<h1[^>]*>(.*?)</h1>', r'# \1'),
+            (r'<h2[^>]*>(.*?)</h2>', r'## \1'),
+            (r'<h3[^>]*>(.*?)</h3>', r'### \1'),
+            (r'<h4[^>]*>(.*?)</h4>', r'#### \1'),
+            (r'<h5[^>]*>(.*?)</h5>', r'##### \1'),
+            (r'<h6[^>]*>(.*?)</h6>', r'###### \1'),
+            
+            # Text formatting
+            (r'<strong[^>]*>(.*?)</strong>', r'**\1**'),
+            (r'<b[^>]*>(.*?)</b>', r'**\1**'),
+            (r'<em[^>]*>(.*?)</em>', r'*\1*'),
+            (r'<i[^>]*>(.*?)</i>', r'*\1*'),
+            (r'<u[^>]*>(.*?)</u>', r'_\1_'),
+            (r'<code[^>]*>(.*?)</code>', r'`\1`'),
+            
+            # Links
+            (r'<a[^>]*href=["\']([^"\']*)["\'][^>]*>(.*?)</a>', r'[\2](\1)'),
+            
+            # Lists
+            (r'<ul[^>]*>', r''),
+            (r'</ul>', r''),
+            (r'<ol[^>]*>', r''),
+            (r'</ol>', r''),
+            (r'<li[^>]*>(.*?)</li>', r'- \1'),
+            
+            # Paragraphs and breaks
+            (r'<p[^>]*>', r''),
+            (r'</p>', r'\n'),
+            (r'<br[^>]*/?>', r'\n'),
+            (r'<div[^>]*>', r''),
+            (r'</div>', r'\n'),
+            
+            # Blockquotes
+            (r'<blockquote[^>]*>(.*?)</blockquote>', r'> \1'),
+            
+            # Remove remaining HTML tags
+            (r'<[^>]+>', r''),
+            
+            # Clean up whitespace
+            (r'\n\s*\n\s*\n', r'\n\n'),  # Multiple newlines to double
+            (r'^\s+', r''),  # Leading whitespace
+            (r'\s+$', r''),  # Trailing whitespace
+        ]
+        
+        # Apply conversions
+        for pattern, replacement in conversions:
+            text = re.sub(pattern, replacement, text, flags=re.DOTALL | re.IGNORECASE)
+        
+        # Final cleanup
+        text = re.sub(r'\n{3,}', '\n\n', text)  # Max 2 consecutive newlines
+        text = text.strip()
+        
+        return text
+
+    def _get_user_name(self, user_id):
+        """Get user name - to be implemented by subclasses with caching"""
+        if not user_id:
+            return 'Unassigned'
+        
+        try:
+            user_records = self.client['res.users'].search_records([('id', '=', user_id)])
+            if user_records:
+                return user_records[0].name
+        except Exception as e:
+            if self.verbose:
+                print(f"⚠️ Could not get user {user_id}: {e}")
+        
+        return f'User {user_id} (not found)'
 
     def create_terminal_link(self, url, text):
         """

@@ -337,7 +337,7 @@ class OdooProjectFileSearchFinal(OdooBase):
 
     def download_bestand(self, attachment_id, output_path):
         """
-        Download een bestand naar lokale schijf
+        Download een bestand naar lokale schijf - uses shared download method
         
         Args:
             attachment_id: ID van het attachment om te downloaden
@@ -346,67 +346,11 @@ class OdooProjectFileSearchFinal(OdooBase):
         Returns:
             bool: True als succesvol, False anders
         """
-        try:
-            # Eerst het attachment record ophalen met juiste field toegang
-            attachment_records = self.attachments.search_records([('id', '=', attachment_id)])
-            
-            if not attachment_records:
-                print(f"❌ Bestand met ID {attachment_id} niet gevonden")
-                return False
-            
-            attachment = attachment_records[0]
-            
-            # Bestandsnaam ophalen
-            file_name = getattr(attachment, 'name', f'bestand_{attachment_id}')
-            
-            # Controleer of we data hebben
-            if not hasattr(attachment, 'datas'):
-                print(f"❌ Geen data veld beschikbaar voor bestand {file_name}")
-                return False
-            
-            # Data ophalen - handle zowel directe toegang als partial objecten
-            try:
-                file_data_b64 = attachment.datas
-                if hasattr(file_data_b64, '__call__'):
-                    # Het is een partial/callable, probeer het aan te roepen
-                    file_data_b64 = file_data_b64()
-                
-                if not file_data_b64:
-                    print(f"❌ Geen data beschikbaar voor bestand {file_name}")
-                    return False
-                
-                # Decodeer base64 data
-                file_data = base64.b64decode(file_data_b64)
-                
-            except Exception as data_error:
-                print(f"❌ Fout bij toegang tot bestandsdata: {data_error}")
-                return False
-            
-            # Gebruik originele bestandsnaam als geen output_path directory gespecificeerd
-            if output_path.endswith('/') or os.path.isdir(output_path):
-                output_path = os.path.join(output_path, file_name)
-            elif not os.path.basename(output_path):
-                output_path = os.path.join(output_path, file_name)
-            
-            # Maak directory als nodig
-            os.makedirs(os.path.dirname(output_path), exist_ok=True)
-            
-            # Schrijf bestand
-            with open(output_path, 'wb') as f:
-                f.write(file_data)
-
-            print(f"✅ Gedownload: {file_name}")
-            print(f"   Naar: {output_path}")
-            print(f"   Grootte: {len(file_data)} bytes")
-
-            return True
-
-        except Exception as e:
-            print(f"❌ Download gefaald: {e}")
-            import traceback
-            if self.verbose:
-                print(f"   Traceback: {traceback.format_exc()}")
-            return False
+        success = self.download_attachment(attachment_id, output_path)
+        if success and not self.verbose:
+            # Translate success message to Dutch for consistency
+            print(f"✅ Gedownload naar: {output_path}")
+        return success
 
     def export_naar_csv(self, bestanden, filename='project_bestanden.csv'):
         """

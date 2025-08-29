@@ -115,25 +115,19 @@ class OdooTextSearch(OdooBase):
             print(f"🔍 Searching projects...", end="", flush=True)
         
         try:
-            # Build domain for project search
-            domain = []
+            # Build domain using DomainBuilder
+            from .odoo_base import DomainBuilder
             
             # Time filter
-            if since:
-                domain.append(('write_date', '>=', since.strftime('%Y-%m-%d %H:%M:%S')))
+            date_domain = DomainBuilder.date_filter_domain(since)
             
-            # Text search in name
-            name_domain = [('name', 'ilike', search_term)]
-            
-            if include_descriptions:
-                # Search in both name and description
-                text_domain = ['|', ('name', 'ilike', search_term), ('description', 'ilike', search_term)]
-            else:
-                text_domain = name_domain
+            # Text search
+            text_fields = ['name', 'description'] if include_descriptions else ['name']
+            text_domain = DomainBuilder.text_search_domain(search_term, text_fields, include_descriptions)
             
             # Combine domains
-            if domain:
-                final_domain = ['&'] + domain + text_domain
+            if date_domain:
+                final_domain = DomainBuilder.combine_with_and(text_domain, *date_domain)
             else:
                 final_domain = text_domain
             
@@ -192,8 +186,8 @@ class OdooTextSearch(OdooBase):
             return enriched_projects
             
         except Exception as e:
-            print(f"❌ Error searching projects: {e}")
-            return []
+            from .odoo_base import ErrorHandler
+            return ErrorHandler.handle_search_error("project search", e, self.verbose)
 
     def search_tasks(self, search_term, since=None, include_descriptions=True, project_ids=None, limit=None):
         """
@@ -212,36 +206,28 @@ class OdooTextSearch(OdooBase):
             print(f"🔍 Searching tasks...", end="", flush=True)
         
         try:
-            # Build domain for task search
-            domain = []
+            # Build domain using DomainBuilder
+            from .odoo_base import DomainBuilder
+            
+            domain_parts = []
             
             # Time filter
             if since:
-                domain.append(('write_date', '>=', since.strftime('%Y-%m-%d %H:%M:%S')))
+                domain_parts.append(DomainBuilder.date_filter_domain(since))
             
             # Project filter
             if project_ids:
-                domain.append(('project_id', 'in', project_ids))
+                domain_parts.append([('project_id', 'in', project_ids)])
             
             # Text search
-            if include_descriptions:
-                text_domain = ['|', ('name', 'ilike', search_term), ('description', 'ilike', search_term)]
-            else:
-                text_domain = [('name', 'ilike', search_term)]
+            text_fields = ['name', 'description'] if include_descriptions else ['name']
+            text_domain = DomainBuilder.text_search_domain(search_term, text_fields, include_descriptions)
             
-            # Combine domains
-            if domain:
-                final_domain = domain + ['&'] + text_domain if len(domain) == 1 else domain + text_domain
-                # Properly structure the domain
-                if len(domain) == 1:
-                    final_domain = ['&'] + domain + text_domain
-                else:
-                    # Multiple conditions - build properly
-                    final_domain = domain[:]
-                    for condition in text_domain:
-                        final_domain = ['&'] + final_domain + [condition] if isinstance(condition, tuple) else final_domain + [condition]
-            else:
-                final_domain = text_domain
+            # Combine all domains
+            final_domain = text_domain
+            for domain_part in domain_parts:
+                if domain_part:
+                    final_domain = DomainBuilder.combine_with_and(final_domain, *domain_part)
             
             if self.verbose:
                 print(f"🔧 Task domain: {final_domain}")
@@ -259,87 +245,26 @@ class OdooTextSearch(OdooBase):
             else:
                 print(f" {len(tasks)} found", flush=True)
             
-            # Cache found tasks and return enriched results
+            # Use unified task enrichment
             enriched_tasks = []
             for task in tasks:
-                # Extract user ID safely
-                user_id = None
-                user_name = 'Unassigned'
-                
-                if hasattr(task, 'user_ids') and task.user_ids:
-                    try:
-                        if hasattr(task.user_ids, '__len__') and len(task.user_ids) > 0:
-                            first_user = task.user_ids[0]
-                            if hasattr(first_user, 'id'):
-                                user_id = first_user.id
-                                user_name = first_user.name if hasattr(first_user, 'name') else f'User {user_id}'
-                    except:
-                        pass
-                
-                # Get stage/status information
-                stage_name = 'No stage'
-                stage_id = None
-                if hasattr(task, 'stage_id') and task.stage_id:
-                    try:
-                        if hasattr(task.stage_id, 'name'):
-                            stage_name = task.stage_id.name
-                            stage_id = task.stage_id.id if hasattr(task.stage_id, 'id') else task.stage_id
-                        else:
-                            # stage_id might be just an ID, try to get the name
-                            stage_id = task.stage_id
-                            stage_name = f'Stage {stage_id}'
-                    except:
-                        stage_name = 'Stage (unavailable)'
-
-                # Cache task data
-                task_data = {
-                    'id': task.id,
-                    'name': task.name,
-                    'description': getattr(task, 'description', '') or '',
-                    'project_id': task.project_id.id if task.project_id else None,
-                    'project_name': task.project_id.name if task.project_id else 'No project',
-                    'user_id': user_id,
-                    'user_name': user_name,
-                    'create_date': str(task.create_date) if task.create_date else '',
-                    'write_date': str(task.write_date) if task.write_date else '',
-                    'stage_id': stage_id,
-                    'stage_name': stage_name,
-                    'priority': getattr(task, 'priority', '0')
-                }
+                enriched_task = self.enrich_task_data(task, search_term)
                 
                 # Build project-task mapping (but don't cache task data since it changes frequently)
-                if task_data['project_id']:
-                    if task_data['project_id'] not in self.project_task_map:
-                        self.project_task_map[task_data['project_id']] = []
-                    if task.id not in self.project_task_map[task_data['project_id']]:
-                        self.project_task_map[task_data['project_id']].append(task.id)
-                    self.task_project_map[task.id] = task_data['project_id']
+                if enriched_task['project_id']:
+                    if enriched_task['project_id'] not in self.project_task_map:
+                        self.project_task_map[enriched_task['project_id']] = []
+                    if task.id not in self.project_task_map[enriched_task['project_id']]:
+                        self.project_task_map[enriched_task['project_id']].append(task.id)
+                    self.task_project_map[task.id] = enriched_task['project_id']
                 
-                # Create enriched result
-                enriched_task = {
-                    'id': task_data['id'],
-                    'name': task_data['name'],
-                    'description': task_data['description'],
-                    'project_name': task_data['project_name'],
-                    'project_id': task_data['project_id'],
-                    'stage': task_data['stage_name'],
-                    'stage_id': task_data['stage_id'],
-                    'user': task_data['user_name'],
-                    'priority': task_data['priority'],
-                    'create_date': task_data['create_date'],
-                    'write_date': task_data['write_date'],
-                    'type': 'task',
-                    'search_term': search_term,
-                    'match_in_name': search_term.lower() in task_data['name'].lower(),
-                    'match_in_description': search_term.lower() in task_data['description'].lower()
-                }
                 enriched_tasks.append(enriched_task)
             
             return enriched_tasks
             
         except Exception as e:
-            print(f"❌ Error searching tasks: {e}")
-            return []
+            from .odoo_base import ErrorHandler
+            return ErrorHandler.handle_search_error("task search", e, self.verbose)
 
     def search_messages(self, search_term, since=None, model_type='both', limit=None):
         """
@@ -1084,68 +1009,8 @@ class OdooTextSearch(OdooBase):
                                 except:
                                     project_name = 'Project (unavailable)'
                             
-                            # Handle user relationship safely - try different field names
-                            assigned_user = 'Unassigned'
-                            user_id = None
-                            
-                            # Try user fields in order of reliability (based on debug findings)
-                            # user_ids is the correct field, others return task ID incorrectly
-                            for field_name in ['user_ids', 'create_uid', 'write_uid', 'user_id', 'assigned_user_id']:
-                                try:
-                                    if hasattr(task, field_name):
-                                        user_field = getattr(task, field_name, None)
-                                        if user_field:
-                                            # Handle RecordList (user_ids field)
-                                            if hasattr(user_field, '__len__') and len(user_field) > 0:
-                                                # This is a RecordList, get the first user
-                                                first_user = user_field[0]
-                                                if hasattr(first_user, 'id'):
-                                                    user_id = first_user.id
-                                                    if self.verbose:
-                                                        print(f"🔍 Found user ID {user_id} via {field_name}[0].id for file {file.id}")
-                                                    break
-                                            # Handle direct Record objects (create_uid, write_uid)
-                                            elif hasattr(user_field, 'id') and not str(user_field).startswith('functools.partial'):
-                                                user_id = user_field.id
-                                                if self.verbose:
-                                                    print(f"🔍 Found user ID {user_id} via {field_name}.id for file {file.id}")
-                                                break
-                                            # Handle integer IDs
-                                            elif isinstance(user_field, int):
-                                                user_id = user_field
-                                                if self.verbose:
-                                                    print(f"🔍 Found user ID {user_id} via {field_name} (int) for file {file.id}")
-                                                break
-                                            # Handle partial objects (but skip if they return task ID)
-                                            elif str(user_field).startswith('functools.partial'):
-                                                partial_str = str(user_field)
-                                                import re
-                                                id_match = re.search(r'\[(\d+)\]', partial_str)
-                                                if id_match:
-                                                    extracted_id = int(id_match.group(1))
-                                                    # Skip if extracted ID matches task ID (wrong field)
-                                                    if extracted_id == task.id:
-                                                        if self.verbose:
-                                                            print(f"⚠️ Extracted ID {extracted_id} matches task ID, skipping user field {field_name}")
-                                                        continue
-                                                    user_id = extracted_id
-                                                    if self.verbose:
-                                                        print(f"🔍 Extracted user ID {user_id} from partial object for file {file.id}")
-                                                    break
-                                except Exception as field_error:
-                                    if self.verbose:
-                                        print(f"⚠️ Error accessing field {field_name}: {field_error}")
-                                    continue
-                            
-                            # Use cached user lookup - ensure user_id is an integer
-                            if user_id:
-                                # Make sure user_id is actually an integer, not a partial object
-                                if isinstance(user_id, int):
-                                    assigned_user = self._get_user_name(user_id)
-                                else:
-                                    if self.verbose:
-                                        print(f"⚠️ user_id is not an integer: {type(user_id)} - {user_id}")
-                                    assigned_user = 'User (invalid ID format)'
+                            # Use shared user extraction method
+                            user_id, assigned_user = self.extract_user_from_task(task)
                             
                             enriched_file.update({
                                 'related_type': 'Task',
@@ -1195,112 +1060,9 @@ class OdooTextSearch(OdooBase):
         
         for task in tasks:
             try:
-                # Get task data from cache if available
-                task_data = self._get_cached_task(task.id)
-                if task_data:
-                    enriched_task = {
-                        'id': task_data['id'],
-                        'name': task_data['name'],
-                        'description': task_data['description'],
-                        'project_name': task_data['project_name'],
-                        'project_id': task_data['project_id'],
-                        'stage': task_data['stage_name'],
-                        'stage_id': task_data['stage_id'],
-                        'user': task_data['user_name'],
-                        'priority': task_data['priority'],
-                        'create_date': task_data['create_date'],
-                        'write_date': task_data['write_date'],
-                        'type': 'task',
-                        'search_term': search_term,
-                        'match_in_name': search_term.lower() in task_data['name'].lower(),
-                        'match_in_description': search_term.lower() in task_data['description'].lower()
-                    }
-                    enriched.append(enriched_task)
-                else:
-                    # Fallback to original method for uncached tasks
-                    # Handle functools.partial objects by browsing the record properly
-                    if hasattr(task, 'id') and not hasattr(task, 'name'):
-                        # This is likely a partial object, browse it properly
-                        task = self.tasks.browse(task.id)
-                    
-                    # Safely get attributes with fallbacks
-                    task_name = getattr(task, 'name', f'Task {task.id}')
-                    task_description = getattr(task, 'description', '') or ''
-                    
-                    # Handle project relationship
-                    project_name = 'No project'
-                    project_id = None
-                    if hasattr(task, 'project_id') and task.project_id:
-                        try:
-                            project_name = task.project_id.name if hasattr(task.project_id, 'name') else f'Project {task.project_id.id}'
-                            project_id = task.project_id.id if hasattr(task.project_id, 'id') else task.project_id
-                        except:
-                            project_name = 'Project (unavailable)'
-                    
-                    # Handle user relationship using cache
-                    user_name = 'Unassigned'
-                    user_id = None
-                    
-                    # Try user fields in order of reliability
-                    for field_name in ['user_ids', 'create_uid', 'write_uid', 'user_id', 'assigned_user_id']:
-                        try:
-                            if hasattr(task, field_name):
-                                user_field = getattr(task, field_name, None)
-                                if user_field:
-                                    # Handle RecordList (user_ids field)
-                                    if hasattr(user_field, '__len__') and len(user_field) > 0:
-                                        first_user = user_field[0]
-                                        if hasattr(first_user, 'id'):
-                                            user_id = first_user.id
-                                            break
-                                    # Handle direct Record objects
-                                    elif hasattr(user_field, 'id') and not str(user_field).startswith('functools.partial'):
-                                        user_id = user_field.id
-                                        break
-                                    # Handle integer IDs
-                                    elif isinstance(user_field, int):
-                                        user_id = user_field
-                                        break
-                        except Exception:
-                            continue
-                    
-                    # Use cached user lookup
-                    if user_id and isinstance(user_id, int):
-                        user_name = self._get_user_name(user_id)
-                    
-                    # Handle stage/status information
-                    stage_name = 'No stage'
-                    stage_id = None
-                    if hasattr(task, 'stage_id') and task.stage_id:
-                        try:
-                            if hasattr(task.stage_id, 'name'):
-                                stage_name = task.stage_id.name
-                                stage_id = task.stage_id.id if hasattr(task.stage_id, 'id') else task.stage_id
-                            else:
-                                # stage_id might be just an ID, try to get the name
-                                stage_id = task.stage_id
-                                stage_name = f'Stage {stage_id}'
-                        except:
-                            stage_name = 'Stage (unavailable)'
-                    
-                    enriched_task = {
-                        'id': task.id,
-                        'name': task_name,
-                        'description': task_description,
-                        'project_name': project_name,
-                        'project_id': project_id,
-                        'stage': stage_name,
-                        'stage_id': stage_id,
-                        'user': user_name,
-                        'priority': getattr(task, 'priority', '0'),
-                        'create_date': str(getattr(task, 'create_date', '')) if getattr(task, 'create_date', None) else '',
-                        'write_date': str(getattr(task, 'write_date', '')) if getattr(task, 'write_date', None) else '',
-                        'type': 'task',
-                        'search_term': search_term,
-                        'match_in_name': search_term.lower() in task_name.lower(),
-                        'match_in_description': search_term.lower() in task_description.lower()
-                    }
-                    enriched.append(enriched_task)
+                # Use unified task enrichment method
+                enriched_task = self.enrich_task_data(task, search_term)
+                enriched.append(enriched_task)
                 
             except Exception as e:
                 print(f"⚠️ Error enriching task {getattr(task, 'id', 'unknown')}: {e}")
@@ -1598,7 +1360,7 @@ class OdooTextSearch(OdooBase):
         
         # Show description if there's a match
         if project['match_in_description'] and project['description']:
-            markdown_desc = self._html_to_markdown(project['description'])
+            markdown_desc = self.html_to_markdown(project['description'])
             desc_snippet = markdown_desc[:400] + "..." if len(markdown_desc) > 400 else markdown_desc
             desc_snippet = desc_snippet.replace('\n', ' ').strip()
             print(f"{indent}📝 Description:")
@@ -1627,7 +1389,7 @@ class OdooTextSearch(OdooBase):
                 print(f"{indent}✅ Match in description")
         
         if task['match_in_description'] and task['description']:
-            markdown_desc = self._html_to_markdown(task['description'])
+            markdown_desc = self.html_to_markdown(task['description'])
             desc_snippet = markdown_desc[:400] + "..." if len(markdown_desc) > 400 else markdown_desc
             desc_snippet = desc_snippet.replace('\n', ' ').strip()
             print(f"{indent}📝 Description:")
@@ -1647,7 +1409,7 @@ class OdooTextSearch(OdooBase):
         print(f"{indent}📅 {message['date']}")
         
         if message['body']:
-            markdown_body = self._html_to_markdown(message['body'])
+            markdown_body = self.html_to_markdown(message['body'])
             body_snippet = markdown_body[:400] + "..." if len(markdown_body) > 400 else markdown_body
             body_snippet = body_snippet.replace('\n', ' ').strip()
             print(f"{indent}💬 Message:")
@@ -1693,7 +1455,7 @@ class OdooTextSearch(OdooBase):
                 print(f"   ✅ Match in description")
         
         if task['match_in_description'] and task['description']:
-            markdown_desc = self._html_to_markdown(task['description'])
+            markdown_desc = self.html_to_markdown(task['description'])
             desc_snippet = markdown_desc[:400] + "..." if len(markdown_desc) > 400 else markdown_desc
             desc_snippet = desc_snippet.replace('\n', ' ').strip()
             print(f"   📝 Description:")
@@ -1723,7 +1485,7 @@ class OdooTextSearch(OdooBase):
         print(f"   📅 {message['date']}")
         
         if message['body']:
-            markdown_body = self._html_to_markdown(message['body'])
+            markdown_body = self.html_to_markdown(message['body'])
             body_snippet = markdown_body[:400] + "..." if len(markdown_body) > 400 else markdown_body
             body_snippet = body_snippet.replace('\n', ' ').strip()
             print(f"   💬 Message:")
@@ -1775,78 +1537,6 @@ class OdooTextSearch(OdooBase):
         if file.get('error'):
             print(f"   ⚠️ Error: {file['error']}")
 
-    def _html_to_markdown(self, html_content):
-        """
-        Convert HTML content to readable markdown-like text
-        
-        Args:
-            html_content: HTML string to convert
-            
-        Returns:
-            Cleaned markdown-like text
-        """
-        if not html_content:
-            return ""
-        
-        # Unescape HTML entities first
-        text = html.unescape(html_content)
-        
-        # Convert common HTML tags to markdown equivalents
-        conversions = [
-            # Headers
-            (r'<h1[^>]*>(.*?)</h1>', r'# \1'),
-            (r'<h2[^>]*>(.*?)</h2>', r'## \1'),
-            (r'<h3[^>]*>(.*?)</h3>', r'### \1'),
-            (r'<h4[^>]*>(.*?)</h4>', r'#### \1'),
-            (r'<h5[^>]*>(.*?)</h5>', r'##### \1'),
-            (r'<h6[^>]*>(.*?)</h6>', r'###### \1'),
-            
-            # Text formatting
-            (r'<strong[^>]*>(.*?)</strong>', r'**\1**'),
-            (r'<b[^>]*>(.*?)</b>', r'**\1**'),
-            (r'<em[^>]*>(.*?)</em>', r'*\1*'),
-            (r'<i[^>]*>(.*?)</i>', r'*\1*'),
-            (r'<u[^>]*>(.*?)</u>', r'_\1_'),
-            (r'<code[^>]*>(.*?)</code>', r'`\1`'),
-            
-            # Links
-            (r'<a[^>]*href=["\']([^"\']*)["\'][^>]*>(.*?)</a>', r'[\2](\1)'),
-            
-            # Lists
-            (r'<ul[^>]*>', r''),
-            (r'</ul>', r''),
-            (r'<ol[^>]*>', r''),
-            (r'</ol>', r''),
-            (r'<li[^>]*>(.*?)</li>', r'- \1'),
-            
-            # Paragraphs and breaks
-            (r'<p[^>]*>', r''),
-            (r'</p>', r'\n'),
-            (r'<br[^>]*/?>', r'\n'),
-            (r'<div[^>]*>', r''),
-            (r'</div>', r'\n'),
-            
-            # Blockquotes
-            (r'<blockquote[^>]*>(.*?)</blockquote>', r'> \1'),
-            
-            # Remove remaining HTML tags
-            (r'<[^>]+>', r''),
-            
-            # Clean up whitespace
-            (r'\n\s*\n\s*\n', r'\n\n'),  # Multiple newlines to double
-            (r'^\s+', r''),  # Leading whitespace
-            (r'\s+$', r''),  # Trailing whitespace
-        ]
-        
-        # Apply conversions
-        for pattern, replacement in conversions:
-            text = re.sub(pattern, replacement, text, flags=re.DOTALL | re.IGNORECASE)
-        
-        # Final cleanup
-        text = re.sub(r'\n{3,}', '\n\n', text)  # Max 2 consecutive newlines
-        text = text.strip()
-        
-        return text
 
     def _format_wrapped_text(self, text, indent, width=80, prefix="│ "):
         """
@@ -1881,7 +1571,7 @@ class OdooTextSearch(OdooBase):
 
     def download_file(self, file_id, output_path):
         """
-        Download a file to local disk
+        Download a file to local disk - uses shared download method
         
         Args:
             file_id: ID of the attachment to download
@@ -1890,67 +1580,7 @@ class OdooTextSearch(OdooBase):
         Returns:
             bool: True if successful, False otherwise
         """
-        try:
-            # First get the attachment record with proper field access
-            attachment_records = self.attachments.search_records([('id', '=', file_id)])
-            
-            if not attachment_records:
-                print(f"❌ File with ID {file_id} not found")
-                return False
-            
-            attachment = attachment_records[0]
-            
-            # Get the file name
-            file_name = getattr(attachment, 'name', f'file_{file_id}')
-            
-            # Check if we have data
-            if not hasattr(attachment, 'datas'):
-                print(f"❌ No data field available for file {file_name}")
-                return False
-            
-            # Get the data - handle both direct access and partial objects
-            try:
-                file_data_b64 = attachment.datas
-                if hasattr(file_data_b64, '__call__'):
-                    # It's a partial/callable, try to call it
-                    file_data_b64 = file_data_b64()
-                
-                if not file_data_b64:
-                    print(f"❌ No data available for file {file_name}")
-                    return False
-                
-                # Decode base64 data
-                file_data = base64.b64decode(file_data_b64)
-                
-            except Exception as data_error:
-                print(f"❌ Error accessing file data: {data_error}")
-                return False
-            
-            # Use original filename if no output_path directory specified
-            if output_path.endswith('/') or os.path.isdir(output_path):
-                output_path = os.path.join(output_path, file_name)
-            elif not os.path.basename(output_path):
-                output_path = os.path.join(output_path, file_name)
-            
-            # Create directory if needed
-            os.makedirs(os.path.dirname(output_path), exist_ok=True)
-            
-            # Write file
-            with open(output_path, 'wb') as f:
-                f.write(file_data)
-            
-            print(f"✅ Downloaded: {file_name}")
-            print(f"   To: {output_path}")
-            print(f"   Size: {len(file_data)} bytes")
-            
-            return True
-            
-        except Exception as e:
-            print(f"❌ Download failed: {e}")
-            import traceback
-            if self.verbose:
-                print(f"   Traceback: {traceback.format_exc()}")
-            return False
+        return self.download_attachment(file_id, output_path)
 
     def get_file_statistics(self, files):
         """
