@@ -1,8 +1,8 @@
+from pathlib import Path
+import edwh
 from edwh import improved_task as task
 from invoke import Context
-import threading
-import webbrowser
-import time
+
 
 @task(
     help={
@@ -159,10 +159,7 @@ def setup(c: Context,
         edwh odoo.setup
         edwh odoo.setup --verbose
     """
-    import os
-    from pathlib import Path
-    import edwh
-    
+
     if verbose:
         print("🚀 Setting up Odoo Plugin")
         print("=" * 50)
@@ -224,7 +221,7 @@ def setup(c: Context,
                 'success': False,
                 'error': 'Password is required'
             }
-        
+
         # Test connection
         if verbose:
             print("\n🔍 Testing Odoo connection...")
