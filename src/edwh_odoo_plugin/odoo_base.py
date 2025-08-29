@@ -387,6 +387,16 @@ class OdooBase:
         if not html_content:
             return ""
         
+        try:
+            # First try to convert any markdown content back to HTML for consistency
+            import markdown2
+            # But since we're getting HTML from Odoo, we'll just strip tags
+            # and keep the existing logic for now
+            pass
+        except ImportError:
+            if self.verbose:
+                print("Warning: markdown2 not available")
+        
         # Unescape HTML entities first
         text = html.unescape(html_content)
         
@@ -446,6 +456,31 @@ class OdooBase:
         text = text.strip()
         
         return text
+
+    def markdown_to_html(self, markdown_content):
+        """
+        Convert markdown content to HTML using markdown2 library
+        
+        Args:
+            markdown_content: Markdown string to convert
+            
+        Returns:
+            HTML string
+        """
+        if not markdown_content:
+            return ""
+        
+        try:
+            import markdown2
+            return markdown2.markdown(markdown_content)
+        except ImportError:
+            if self.verbose:
+                print("Warning: markdown2 not available, returning content as-is")
+            return markdown_content
+        except Exception as e:
+            if self.verbose:
+                print(f"Warning: Failed to convert markdown with markdown2: {e}")
+            return markdown_content
 
     def _get_user_name(self, user_id):
         """Get user name - to be implemented by subclasses with caching"""

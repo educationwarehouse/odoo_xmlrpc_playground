@@ -27,6 +27,7 @@ dependencies = [
     "edwh",
     "openerp-proxy",
     "python-dotenv",
+    "markdown2",
 ]
 
 [project.optional-dependencies]
