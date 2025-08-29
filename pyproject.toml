@@ -25,6 +25,8 @@ classifiers = [
 ]
 dependencies = [
     "edwh",
+    "openerp-proxy",
+    "python-dotenv",
 ]
 
 [project.optional-dependencies]
