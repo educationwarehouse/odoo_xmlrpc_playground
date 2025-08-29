@@ -1,15 +1,9 @@
 from edwh import task
 from invoke import Context
 
-
-@task()
-def foo(c: Context) -> None:
-    c.run("echo Hello World")
-
-
 @task(
     help={
-        'search_term': 'Text to search for',
+        'search_term': 'Required text to search for',
         'since': 'Time reference (e.g., "1 week", "3 days", "2 months")',
         'type': 'What to search in: all, projects, tasks, logs, files (default: all)',
         'no_logs': 'Exclude search in log messages (logs included by default)',
@@ -23,10 +17,10 @@ def foo(c: Context) -> None:
         'download_path': 'Directory to download files to (default: ./downloads/)',
         'stats': 'Show file statistics (when files are included)',
         'verbose': 'Show detailed search information and debug output'
-    }
+    }, positional=['search_term']
 )
 def search(c: Context, 
-          search_term=None,
+          search_term,
           since=None,
           type='all',
           no_logs=False,

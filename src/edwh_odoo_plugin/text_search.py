@@ -27,7 +27,7 @@ import csv
 import html
 import base64
 import textwrap
-from odoo_base import OdooBase
+from .odoo_base import OdooBase
 
 
 class OdooTextSearch(OdooBase):
