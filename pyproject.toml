@@ -3,9 +3,9 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "edwh-demo-plugin"
+name = "edwh-odoo-plugin"
 dynamic = ["version"]
-description = 'Demo project with a plugin to be discovered from the edwh package'
+description = 'Odoo (search) support plugin for EDWH tooling.'
 readme = "README.md"
 requires-python = ">=3.11"
 license = "MIT"
@@ -35,21 +35,21 @@ dev = [
 ]
 
 [project.urls]
-Documentation = "https://github.com/educationwarehouse/edwh-demo-tasks-plugin#readme"
-Issues = "https://github.com/educationwarehouse/edwh-demo-tasks-plugin/issues"
-Source = "https://github.com/educationwarehouse/edwh-demo-tasks-plugin"
+Documentation = "https://github.com/educationwarehouse/odoo#readme"
+Issues = "https://github.com/educationwarehouse/odoo/issues"
+Source = "https://github.com/educationwarehouse/odoo"
 
 # https://packaging.python.org/en/latest/guides/creating-and-discovering-plugins/#using-package-metadata
 [project.entry-points."edwh.tasks"]
 # namespace: (edwh demo.command)
-demo = "edwh_demo_plugin.demo_plugin"
+odoo = "edwh_odoo_plugin.odoo_plugin"
 
 [tool.hatch.version]
-path = "src/edwh_demo_plugin/__about__.py"
+path = "src/edwh_odoo_plugin/__about__.py"
 
 [tool.semantic_release]
 branch = "master"
-version_variable = "src/edwh_demo_plugin/__about__.py:__version__"
+version_variable = "src/edwh_odoo_plugin/__about__.py:__version__"
 change_log = "CHANGELOG.md"
 upload_to_repository = false
 upload_to_release = false
@@ -77,7 +77,7 @@ cov = [
 ]
 
 [[tool.hatch.envs.all.matrix]]
-python = ["3.10", "3.11", "3.12"]
+python = ["3.10", "3.11", "3.12", "3.13"]
 
 [tool.hatch.envs.lint]
 detached = true
@@ -87,7 +87,7 @@ dependencies = [
     "ruff>=0.0.243",
 ]
 [tool.hatch.envs.lint.scripts]
-typing = "mypy --install-types --non-interactive {args:src/edwh_demo_plugin tests}"
+typing = "mypy --install-types --non-interactive {args:src/edwh_odoo_plugin tests}"
 style = [
     "ruff {args:.}",
     "black --check --diff {args:.}",
@@ -142,7 +142,7 @@ unfixable = [
 ]
 
 [tool.ruff.lint.isort]
-known-first-party = ["edwh_demo_plugin"]
+known-first-party = ["edwh_odoo_plugin"]
 
 [tool.ruff.lint.flake8-tidy-imports]
 ban-relative-imports = "all"
@@ -152,16 +152,16 @@ ban-relative-imports = "all"
 "tests/**/*" = ["PLR2004", "S101", "TID252"]
 
 [tool.coverage.run]
-source_pkgs = ["edwh_demo_plugin", "tests"]
+source_pkgs = ["edwh_odoo_plugin", "tests"]
 branch = true
 parallel = true
 omit = [
-    "src/edwh_demo_plugin/__about__.py",
+    "src/edwh_odoo_plugin/__about__.py",
 ]
 
 [tool.coverage.paths]
-edwh_demo_plugin = ["src/edwh_demo_plugin", "*/edwh-demo-plugin/src/edwh_demo_plugin"]
-tests = ["tests", "*/edwh-demo-plugin/tests"]
+edwh_odoo_plugin = ["src/edwh_odoo_plugin", "*/edwh-odoo-plugin/src/edwh_odoo_plugin"]
+tests = ["tests", "*/edwh-odoo-plugin/tests"]
 
 [tool.coverage.report]
 exclude_lines = [
