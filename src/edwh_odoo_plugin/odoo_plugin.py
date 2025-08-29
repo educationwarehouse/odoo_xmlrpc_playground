@@ -150,30 +150,124 @@ def search(c: Context,
 def setup(c: Context,
           verbose=False):
     """
-    Setup Odoo Plugin - Create .env configuration file
+    Setup Odoo Plugin - Create .env configuration file for Odoo connection
+    
+    This will interactively prompt for Odoo connection details and create
+    a .env file with the necessary configuration.
     
     Examples:
         edwh odoo.setup
         edwh odoo.setup --verbose
     """
-    from .odoo_base import create_env_file
+    import os
+    from pathlib import Path
+    import edwh
     
     if verbose:
         print("🚀 Setting up Odoo Plugin")
         print("=" * 50)
     
     try:
-        # Run the setup
-        create_env_file()
+        dotenv_path = Path(".env")
+        if not dotenv_path.exists():
+            dotenv_path.touch()
         
-        print(f"✅ Setup completed successfully!")
+        # Check for existing Odoo configuration
+        existing_url = os.getenv("ODOO_URL")
+        existing_db = os.getenv("ODOO_DB")
+        existing_user = os.getenv("ODOO_USER")
+        
+        if existing_url and existing_db and existing_user:
+            if verbose:
+                print("✅ Odoo configuration already exists:")
+                print(f"   URL: {existing_url}")
+                print(f"   Database: {existing_db}")
+                print(f"   User: {existing_user}")
+            
+            if not edwh.confirm("Odoo configuration already exists. Do you want to reconfigure? [yN] "):
+                print("✅ Using existing Odoo configuration")
+                return {
+                    'success': True,
+                    'message': 'Using existing Odoo configuration'
+                }
+        
+        # Interactive setup for Odoo connection
+        print("\n📋 Odoo Connection Setup")
+        print("Please provide your Odoo connection details:")
+        
+        odoo_url = edwh.check_env(
+            key="ODOO_URL",
+            default="https://your-odoo-instance.com",
+            comment="Odoo server URL (e.g., https://your-company.odoo.com)"
+        )
+        
+        odoo_db = edwh.check_env(
+            key="ODOO_DB", 
+            default="your-database-name",
+            comment="Odoo database name"
+        )
+        
+        odoo_user = edwh.check_env(
+            key="ODOO_USER",
+            default="your-username",
+            comment="Odoo username/email"
+        )
+        
+        odoo_password = edwh.check_env(
+            key="ODOO_PASSWORD",
+            default="",
+            comment="Odoo password (will be hidden in .env file)"
+        )
+        
+        # Optional: API key for newer Odoo versions
+        use_api_key = edwh.confirm("Do you want to use an API key instead of password? [yN] ")
+        if use_api_key:
+            odoo_api_key = edwh.check_env(
+                key="ODOO_API_KEY",
+                default="",
+                comment="Odoo API key (recommended for production)"
+            )
+        
+        # Test connection
+        if verbose:
+            print("\n🔍 Testing Odoo connection...")
+            
+        try:
+            from .odoo_base import OdooBase
+            test_connection = OdooBase(verbose=verbose)
+            test_connection._connect()
+            print("✅ Odoo connection test successful!")
+        except Exception as conn_error:
+            print(f"⚠️  Connection test failed: {conn_error}")
+            if not edwh.confirm("Connection test failed. Continue anyway? [yN] "):
+                return {
+                    'success': False,
+                    'error': f'Connection test failed: {conn_error}'
+                }
+        
+        print(f"\n✅ Odoo plugin setup completed successfully!")
+        print(f"📁 Configuration saved to: {dotenv_path.absolute()}")
+        print(f"\n🚀 You can now use:")
+        print(f"   edwh odoo.search 'your search term'")
+        print(f"   edwh odoo.web")
         
         # Return success state for hookable tasks
         return {
             'success': True,
-            'message': 'Setup completed successfully'
+            'message': 'Odoo plugin setup completed successfully',
+            'config': {
+                'url': odoo_url,
+                'database': odoo_db,
+                'user': odoo_user
+            }
         }
         
+    except KeyboardInterrupt:
+        print(f"\n🛑 Setup cancelled by user")
+        return {
+            'success': False,
+            'error': 'Setup cancelled by user'
+        }
     except Exception as e:
         print(f"❌ Setup error: {e}")
         if verbose:
