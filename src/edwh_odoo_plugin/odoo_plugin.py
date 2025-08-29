@@ -181,37 +181,48 @@ def setup(c: Context,
         print("\n📋 Odoo Connection Setup")
         print("Please provide your Odoo connection details:")
         
-        odoo_url = edwh.check_env(
-            key="ODOO_URL",
-            default="https://your-odoo-instance.com",
-            comment="Odoo server URL (e.g., https://your-company.odoo.com)"
+        odoo_host = edwh.check_env(
+            key="ODOO_HOST",
+            default="your-odoo-instance.odoo.com",
+            comment="Odoo server hostname (e.g., your-company.odoo.com)"
         )
         
-        odoo_db = edwh.check_env(
-            key="ODOO_DB", 
+        odoo_port = edwh.check_env(
+            key="ODOO_PORT",
+            default="443",
+            comment="Odoo server port (443 for HTTPS, 80 for HTTP, 8069 for development)"
+        )
+        
+        odoo_protocol = edwh.check_env(
+            key="ODOO_PROTOCOL",
+            default="xml-rpcs",
+            comment="Odoo protocol (xml-rpcs for HTTPS, xml-rpc for HTTP)",
+            allowed_values=("xml-rpc", "xml-rpcs")
+        )
+        
+        odoo_database = edwh.check_env(
+            key="ODOO_DATABASE", 
             default="your-database-name",
             comment="Odoo database name"
         )
         
         odoo_user = edwh.check_env(
             key="ODOO_USER",
-            default="your-username",
+            default="your-username@company.com",
             comment="Odoo username/email"
         )
         
-        # API key is required for authentication
-        odoo_api_key = edwh.check_env(
-            key="ODOO_API_KEY",
+        odoo_password = edwh.check_env(
+            key="ODOO_PASSWORD",
             default="",
-            comment="Odoo API key (required for authentication)"
+            comment="Odoo password"
         )
         
-        if not odoo_api_key:
-            print("❌ Error: API key is required for Odoo authentication")
-            print("   Please generate an API key in your Odoo user preferences")
+        if not odoo_password:
+            print("❌ Error: Password is required for Odoo authentication")
             return {
                 'success': False,
-                'error': 'API key is required'
+                'error': 'Password is required'
             }
         
         # Test connection
@@ -242,8 +253,10 @@ def setup(c: Context,
             'success': True,
             'message': 'Odoo plugin setup completed successfully',
             'config': {
-                'url': odoo_url,
-                'database': odoo_db,
+                'host': odoo_host,
+                'port': odoo_port,
+                'protocol': odoo_protocol,
+                'database': odoo_database,
                 'user': odoo_user
             }
         }
