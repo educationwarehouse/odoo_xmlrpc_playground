@@ -199,8 +199,8 @@ def setup(c: Context,
                 'password': os.getenv('ODOO_PASSWORD', '')
             }
             
-            # Check if configuration is complete
-            if all(existing_config.values()):
+            # Check if configuration is complete (all values must be non-empty)
+            if all(existing_config.values()) and all(val.strip() for val in existing_config.values()):
                 print("\n✅ Configuration already up to date - nothing changed!")
                 print(f"📁 Current configuration in: {dotenv_path.absolute()}")
                 print("\n📋 Current settings:")
