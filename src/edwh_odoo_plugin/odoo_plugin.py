@@ -174,28 +174,27 @@ def setup(c: Context,
             print(f"   1. Current directory: {cwd_dotenv.absolute()}")
             print(f"   2. Config directory:  {config_dotenv.absolute()}")
         
+        # Always use config directory for setup - never create in current directory
+        dotenv_path = config_dotenv
+        
         if cwd_dotenv.exists():
-            # check local first
-            dotenv_path = cwd_dotenv
             if verbose:
-                print(f"✅ Found .env file in current directory")
+                print(f"⚠️  Found .env file in current directory: {cwd_dotenv.absolute()}")
+                print(f"   Setup will create/update config file instead: {config_dotenv.absolute()}")
             else:
-                print(f"📁 Using .env file: {dotenv_path.absolute()}")
-        elif config_dotenv.exists():
-            # use existing config file
-            dotenv_path = config_dotenv
+                print(f"⚠️  Found local .env file, but setup will use config directory")
+        
+        if config_dotenv.exists():
             if verbose:
-                print(f"✅ Found .env file in config directory")
+                print(f"✅ Found existing config file: {config_dotenv.absolute()}")
             else:
-                print(f"📁 Using .env file: {dotenv_path.absolute()}")
+                print(f"📁 Using config file: {config_dotenv.absolute()}")
         else:
-            # create new file in config directory only
-            dotenv_path = config_dotenv
             dotenv_path.parent.mkdir(parents=True, exist_ok=True)
             if verbose:
-                print(f"📝 Will create new .env file in config directory")
+                print(f"📝 Will create new config file: {config_dotenv.absolute()}")
             else:
-                print(f"📝 Will create new .env file: {dotenv_path.absolute()}")
+                print(f"📝 Will create new config file: {config_dotenv.absolute()}")
 
         # Check existing configuration
         existing_config = {}
