@@ -52,12 +52,6 @@ def search(c: Context,
     """
     from .text_search import OdooTextSearch
     import os
-    import warnings
-    
-    # Suppress the pkg_resources deprecation warning from odoo_rpc_client
-    warnings.filterwarnings("ignore", 
-                          message="pkg_resources is deprecated as an API.*",
-                          category=UserWarning)
     
     # Validate search type
     valid_types = ['all', 'projects', 'tasks', 'logs', 'files']
