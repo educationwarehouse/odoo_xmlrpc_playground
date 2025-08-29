@@ -185,8 +185,18 @@ import os
 import threading
 import concurrent.futures
 from datetime import datetime
+
+# Add both current directory and src directory to path
 sys.path.insert(0, "{os.getcwd()}")
-from text_search import OdooTextSearch
+sys.path.insert(0, os.path.join("{os.getcwd()}", "src"))
+
+try:
+    from edwh_odoo_plugin.text_search import OdooTextSearch
+except ImportError:
+    try:
+        from src.edwh_odoo_plugin.text_search import OdooTextSearch
+    except ImportError:
+        from text_search import OdooTextSearch
 
 # Read input
 with open("{input_file_path}", "r") as f:
@@ -550,7 +560,13 @@ except Exception as e:
             
             # Create temporary searcher for download (downloads are infrequent)
             try:
-                from text_search import OdooTextSearch
+                try:
+                    from .text_search import OdooTextSearch
+                except ImportError:
+                    try:
+                        from edwh_odoo_plugin.text_search import OdooTextSearch
+                    except ImportError:
+                        from text_search import OdooTextSearch
                 searcher = OdooTextSearch(verbose=False)
             except Exception as e:
                 self.send_json_response({'error': f'Failed to connect to Odoo: {str(e)}'}, 500)
