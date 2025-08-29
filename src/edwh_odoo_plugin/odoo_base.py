@@ -38,6 +38,8 @@ class OdooBase:
         self.database = os.getenv('ODOO_DATABASE')
         self.user = os.getenv('ODOO_USER')
         self.password = os.getenv('ODOO_PASSWORD')
+        self.port = int(os.getenv('ODOO_PORT', '443'))
+        self.protocol = os.getenv('ODOO_PROTOCOL', 'xml-rpcs')
 
         if not all([self.host, self.database, self.user, self.password]):
             raise ValueError("❌ Configuration incomplete! Check your .env file.")
@@ -61,8 +63,8 @@ class OdooBase:
                 dbname=self.database, 
                 user=self.user, 
                 pwd=self.password, 
-                port=443, 
-                protocol='xml-rpcs'
+                port=self.port, 
+                protocol=self.protocol
             )
 
             if self.verbose:
