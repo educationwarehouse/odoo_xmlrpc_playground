@@ -165,14 +165,37 @@ def setup(c: Context,
         print("=" * 50)
     
     try:
-        if (cwd_dotenv := Path.cwd() / '.env').exists():
+        # Show where we're looking for .env files
+        cwd_dotenv = Path.cwd() / '.env'
+        config_dotenv = Path.home() / ".config/edwh/edwh_odoo_plugin.env"
+        
+        if verbose:
+            print(f"\n🔍 Searching for .env configuration files:")
+            print(f"   1. Current directory: {cwd_dotenv.absolute()}")
+            print(f"   2. Config directory:  {config_dotenv.absolute()}")
+        
+        if cwd_dotenv.exists():
             # check local first
             dotenv_path = cwd_dotenv
+            if verbose:
+                print(f"✅ Found .env file in current directory")
+            else:
+                print(f"📁 Using .env file: {dotenv_path.absolute()}")
         else:
             # default to plugin folder as an escape
-            dotenv_path = Path.home() / ".config/edwh/edwh_odoo_plugin.env"
+            dotenv_path = config_dotenv
             if not dotenv_path.exists():
+                dotenv_path.parent.mkdir(parents=True, exist_ok=True)
                 dotenv_path.touch()
+                if verbose:
+                    print(f"📝 Created new .env file in config directory")
+                else:
+                    print(f"📝 Created new .env file: {dotenv_path.absolute()}")
+            else:
+                if verbose:
+                    print(f"✅ Found .env file in config directory")
+                else:
+                    print(f"📁 Using .env file: {dotenv_path.absolute()}")
 
         # Check existing configuration
         existing_config = {}
