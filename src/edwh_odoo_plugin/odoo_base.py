@@ -154,30 +154,3 @@ class OdooBase:
         return f"{size_bytes:.1f} PB"
 
 
-def create_env_file(env_path=None):
-    """
-    Create .env file with configuration template
-    Always uses config directory location
-    """
-    from pathlib import Path
-    
-    if env_path is None:
-        env_path = Path.home() / ".config/edwh/edwh_odoo_plugin.env"
-    
-    env_content = """# Odoo Configuration
-ODOO_HOST=education-warehouse.odoo.com
-ODOO_DATABASE=education-warehouse
-ODOO_USER=your_username@domain.com
-ODOO_PASSWORD=your_api_key_here
-
-# This configuration works with xml-rpcs protocol on port 443
-"""
-
-    if not env_path.exists():
-        env_path.parent.mkdir(parents=True, exist_ok=True)
-        with open(env_path, 'w') as f:
-            f.write(env_content)
-        print(f"✅ Configuration file created: {env_path.absolute()}")
-        print("   Please update the credentials and run the script again")
-        return False
-    return True
