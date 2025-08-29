@@ -1360,8 +1360,7 @@ class OdooTextSearch(OdooBase):
         
         # Show description if there's a match
         if project['match_in_description'] and project['description']:
-            markdown_desc = self.html_to_markdown(project['description'])
-            desc_snippet = markdown_desc[:400] + "..." if len(markdown_desc) > 400 else markdown_desc
+            desc_snippet = project['description'][:400] + "..." if len(project['description']) > 400 else project['description']
             desc_snippet = desc_snippet.replace('\n', ' ').strip()
             print(f"{indent}📝 Description:")
             print(self._format_wrapped_text(desc_snippet, indent + "   "))
@@ -1389,8 +1388,7 @@ class OdooTextSearch(OdooBase):
                 print(f"{indent}✅ Match in description")
         
         if task['match_in_description'] and task['description']:
-            markdown_desc = self.html_to_markdown(task['description'])
-            desc_snippet = markdown_desc[:400] + "..." if len(markdown_desc) > 400 else markdown_desc
+            desc_snippet = task['description'][:400] + "..." if len(task['description']) > 400 else task['description']
             desc_snippet = desc_snippet.replace('\n', ' ').strip()
             print(f"{indent}📝 Description:")
             print(self._format_wrapped_text(desc_snippet, indent + "   "))
@@ -1409,8 +1407,7 @@ class OdooTextSearch(OdooBase):
         print(f"{indent}📅 {message['date']}")
         
         if message['body']:
-            markdown_body = self.html_to_markdown(message['body'])
-            body_snippet = markdown_body[:400] + "..." if len(markdown_body) > 400 else markdown_body
+            body_snippet = message['body'][:400] + "..." if len(message['body']) > 400 else message['body']
             body_snippet = body_snippet.replace('\n', ' ').strip()
             print(f"{indent}💬 Message:")
             print(self._format_wrapped_text(body_snippet, indent + "   "))
@@ -1455,8 +1452,7 @@ class OdooTextSearch(OdooBase):
                 print(f"   ✅ Match in description")
         
         if task['match_in_description'] and task['description']:
-            markdown_desc = self.html_to_markdown(task['description'])
-            desc_snippet = markdown_desc[:400] + "..." if len(markdown_desc) > 400 else markdown_desc
+            desc_snippet = task['description'][:400] + "..." if len(task['description']) > 400 else task['description']
             desc_snippet = desc_snippet.replace('\n', ' ').strip()
             print(f"   📝 Description:")
             print(self._format_wrapped_text(desc_snippet, "      "))
@@ -1485,8 +1481,7 @@ class OdooTextSearch(OdooBase):
         print(f"   📅 {message['date']}")
         
         if message['body']:
-            markdown_body = self.html_to_markdown(message['body'])
-            body_snippet = markdown_body[:400] + "..." if len(markdown_body) > 400 else markdown_body
+            body_snippet = message['body'][:400] + "..." if len(message['body']) > 400 else message['body']
             body_snippet = body_snippet.replace('\n', ' ').strip()
             print(f"   💬 Message:")
             print(self._format_wrapped_text(body_snippet, "      "))

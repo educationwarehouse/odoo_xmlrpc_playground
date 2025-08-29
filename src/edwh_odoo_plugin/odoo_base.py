@@ -292,10 +292,14 @@ class OdooBase:
             except:
                 stage_name = 'Stage (unavailable)'
         
+        # Convert description to markdown
+        raw_description = getattr(task, 'description', '') or ''
+        markdown_description = self.html_to_markdown(raw_description) if raw_description else ''
+        
         enriched_data = {
             'id': task.id,
             'name': getattr(task, 'name', f'Task {task.id}'),
-            'description': getattr(task, 'description', '') or '',
+            'description': markdown_description,
             'project_name': project_name,
             'project_id': project_id,
             'stage': stage_name,
