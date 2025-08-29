@@ -181,21 +181,21 @@ def setup(c: Context,
                 print(f"✅ Found .env file in current directory")
             else:
                 print(f"📁 Using .env file: {dotenv_path.absolute()}")
-        else:
-            # default to plugin folder as an escape
+        elif config_dotenv.exists():
+            # use existing config file
             dotenv_path = config_dotenv
-            if not dotenv_path.exists():
-                dotenv_path.parent.mkdir(parents=True, exist_ok=True)
-                dotenv_path.touch()
-                if verbose:
-                    print(f"📝 Created new .env file in config directory")
-                else:
-                    print(f"📝 Created new .env file: {dotenv_path.absolute()}")
+            if verbose:
+                print(f"✅ Found .env file in config directory")
             else:
-                if verbose:
-                    print(f"✅ Found .env file in config directory")
-                else:
-                    print(f"📁 Using .env file: {dotenv_path.absolute()}")
+                print(f"📁 Using .env file: {dotenv_path.absolute()}")
+        else:
+            # create new file in config directory only
+            dotenv_path = config_dotenv
+            dotenv_path.parent.mkdir(parents=True, exist_ok=True)
+            if verbose:
+                print(f"📝 Will create new .env file in config directory")
+            else:
+                print(f"📝 Will create new .env file: {dotenv_path.absolute()}")
 
         # Check existing configuration
         existing_config = {}
