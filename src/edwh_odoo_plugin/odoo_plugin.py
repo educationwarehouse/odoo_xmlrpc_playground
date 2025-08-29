@@ -196,7 +196,7 @@ def setup(c: Context,
             else:
                 print(f"📝 Will create new config file: {config_dotenv.absolute()}")
 
-        # Check existing configuration
+        # Check existing configuration first
         existing_config = {}
         if dotenv_path.exists():
             import os
@@ -210,6 +210,31 @@ def setup(c: Context,
                 'user': os.getenv('ODOO_USER', ''),
                 'password': os.getenv('ODOO_PASSWORD', '')
             }
+            
+            # Check if configuration is complete
+            if all(existing_config.values()):
+                print("\n✅ Configuration already up to date - nothing changed!")
+                print(f"📁 Current configuration in: {dotenv_path.absolute()}")
+                print("\n📋 Current settings:")
+                print(f"   Host: {existing_config['host']}")
+                print(f"   Port: {existing_config['port']}")
+                print(f"   Protocol: {existing_config['protocol']}")
+                print(f"   Database: {existing_config['database']}")
+                print(f"   User: {existing_config['user']}")
+                print(f"   Password: {'*' * len(existing_config['password']) if existing_config['password'] else '(not set)'}")
+                
+                return {
+                    'success': True,
+                    'message': 'Configuration already up to date',
+                    'changed': False,
+                    'config': {
+                        'host': existing_config['host'],
+                        'port': existing_config['port'],
+                        'protocol': existing_config['protocol'],
+                        'database': existing_config['database'],
+                        'user': existing_config['user']
+                    }
+                }
 
         # Interactive setup for Odoo connection
         print("\n📋 Odoo Connection Setup")
@@ -265,7 +290,7 @@ def setup(c: Context,
                 'error': 'Password is required'
             }
 
-        # Compare new configuration with existing
+        # New configuration
         new_config = {
             'host': odoo_host,
             'port': odoo_port,
@@ -274,40 +299,6 @@ def setup(c: Context,
             'user': odoo_user,
             'password': odoo_password
         }
-
-        # Check if configuration has changed
-        config_changed = False
-        if existing_config:
-            for key, value in new_config.items():
-                if existing_config.get(key) != value:
-                    config_changed = True
-                    break
-        else:
-            config_changed = True  # No existing config means it's new
-
-        if not config_changed:
-            print("\n✅ Configuration already up to date - nothing changed!")
-            print(f"📁 Current configuration in: {dotenv_path.absolute()}")
-            print("\n📋 Current settings:")
-            print(f"   Host: {odoo_host}")
-            print(f"   Port: {odoo_port}")
-            print(f"   Protocol: {odoo_protocol}")
-            print(f"   Database: {odoo_database}")
-            print(f"   User: {odoo_user}")
-            print(f"   Password: {'*' * len(odoo_password) if odoo_password else '(not set)'}")
-            
-            return {
-                'success': True,
-                'message': 'Configuration already up to date',
-                'changed': False,
-                'config': {
-                    'host': odoo_host,
-                    'port': odoo_port,
-                    'protocol': odoo_protocol,
-                    'database': odoo_database,
-                    'user': odoo_user
-                }
-            }
 
         # Test connection
         if verbose:
