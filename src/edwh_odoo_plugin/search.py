@@ -30,6 +30,8 @@ Datum: Augustus 2025
 import os
 import base64
 import csv
+import time
+from functools import wraps
 from datetime import datetime, timedelta
 from .odoo_base import OdooBase
 import warnings
@@ -38,6 +40,31 @@ import warnings
 warnings.filterwarnings("ignore", 
                       message="pkg_resources is deprecated as an API.*",
                       category=UserWarning)
+
+def timing_decorator(operation_name):
+    """Decorator to time operations and log them"""
+    def decorator(func):
+        @wraps(func)
+        def wrapper(self, *args, **kwargs):
+            if hasattr(self, 'verbose') and self.verbose:
+                start_time = time.time()
+                print(f"⏱️  Starting {operation_name}...")
+            
+            result = func(self, *args, **kwargs)
+            
+            if hasattr(self, 'verbose') and self.verbose:
+                elapsed = time.time() - start_time
+                print(f"✅ {operation_name} completed in {elapsed:.2f}s")
+            
+            return result
+        return wrapper
+    return decorator
+
+def log_timing(self, operation, start_time, extra_info=""):
+    """Helper method to log timing information"""
+    if self.verbose:
+        elapsed = time.time() - start_time
+        print(f"⏱️  {operation}: {elapsed:.2f}s {extra_info}")
 
 
 class OdooProjectFileSearchFinal(OdooBase):
@@ -108,16 +135,20 @@ class OdooProjectFileSearchFinal(OdooBase):
 
         return domain
 
+    @timing_decorator("All Project Files Search")
     def zoek_alle_project_bestanden(self, zoek_term=None, bestandstype=None):
         """
         Zoek alle bestanden in projecten en taken - werkende versie
         """
+        start_time = time.time()
         print("🔍 Zoeken naar alle project bestanden...")
 
         try:
             # Haal ALLE project en task IDs op
+            query_start = time.time()
             alle_projecten = self.projects.search_records([])
             alle_taken = self.tasks.search_records([])
+            log_timing(self, "Project/Task ID query", query_start, f"({len(alle_projecten)} projects, {len(alle_taken)} tasks)")
 
             project_ids = [p.id for p in alle_projecten]
             task_ids = [t.id for t in alle_taken]
@@ -127,17 +158,27 @@ class OdooProjectFileSearchFinal(OdooBase):
             print(f"   Taken: {len(task_ids)}")
 
             # Bouw werkend domein
+            domain_start = time.time()
             base_domain = self._build_working_domain(project_ids, task_ids)
             final_domain = self._add_filters(base_domain, zoek_term, bestandstype)
+            log_timing(self, "Domain building", domain_start)
 
             print(f"🔧 Domein: {final_domain}")
 
             # Zoek bestanden
+            search_start = time.time()
             bestanden = self.attachments.search_records(final_domain)
+            log_timing(self, "File search", search_start, f"({len(bestanden)} files)")
 
             print(f"📄 {len(bestanden)} bestanden gevonden")
 
-            return self._verrijk_bestanden(bestanden)
+            # Verrijk bestanden
+            enrich_start = time.time()
+            result = self._verrijk_bestanden(bestanden)
+            log_timing(self, "File enrichment", enrich_start, f"({len(result)} files)")
+            log_timing(self, "Total file search", start_time)
+
+            return result
 
         except Exception as e:
             print(f"❌ Fout bij zoeken: {e}")
@@ -145,65 +186,100 @@ class OdooProjectFileSearchFinal(OdooBase):
             print(f"   Traceback: {traceback.format_exc()}")
             return []
 
+    @timing_decorator("Project-Only Files Search")
     def zoek_alleen_project_bestanden(self, zoek_term=None, bestandstype=None):
         """
         Zoek alleen bestanden die direct aan projecten gekoppeld zijn
         """
+        start_time = time.time()
         print("🔍 Zoeken naar project bestanden (geen taken)...")
 
         try:
+            query_start = time.time()
             alle_projecten = self.projects.search_records([])
+            log_timing(self, "Project query", query_start, f"({len(alle_projecten)} projects)")
+            
             project_ids = [p.id for p in alle_projecten]
 
             print(f"📂 {len(project_ids)} projecten")
 
             # Simpel domein: alleen project bestanden
+            domain_start = time.time()
             base_domain = ['&', ('res_model', '=', 'project.project'), ('res_id', 'in', project_ids)]
             final_domain = self._add_filters(base_domain, zoek_term, bestandstype)
+            log_timing(self, "Domain building", domain_start)
 
             print(f"🔧 Domein: {final_domain}")
 
+            search_start = time.time()
             bestanden = self.attachments.search_records(final_domain)
+            log_timing(self, "File search", search_start, f"({len(bestanden)} files)")
+            
             print(f"📄 {len(bestanden)} project bestanden gevonden")
 
-            return self._verrijk_bestanden(bestanden)
+            # Verrijk bestanden
+            enrich_start = time.time()
+            result = self._verrijk_bestanden(bestanden)
+            log_timing(self, "File enrichment", enrich_start, f"({len(result)} files)")
+            log_timing(self, "Total project-only search", start_time)
+
+            return result
 
         except Exception as e:
             print(f"❌ Fout: {e}")
             return []
 
+    @timing_decorator("Task-Only Files Search")
     def zoek_alleen_taak_bestanden(self, zoek_term=None, bestandstype=None):
         """
         Zoek alleen bestanden die aan taken gekoppeld zijn
         """
+        start_time = time.time()
         print("🔍 Zoeken naar taak bestanden...")
 
         try:
+            query_start = time.time()
             alle_taken = self.tasks.search_records([])
+            log_timing(self, "Task query", query_start, f"({len(alle_taken)} tasks)")
+            
             task_ids = [t.id for t in alle_taken]
 
             print(f"📋 {len(task_ids)} taken")
 
             # Simpel domein: alleen taak bestanden
+            domain_start = time.time()
             base_domain = ['&', ('res_model', '=', 'project.task'), ('res_id', 'in', task_ids)]
             final_domain = self._add_filters(base_domain, zoek_term, bestandstype)
+            log_timing(self, "Domain building", domain_start)
 
             print(f"🔧 Domein: {final_domain}")
 
+            search_start = time.time()
             bestanden = self.attachments.search_records(final_domain)
+            log_timing(self, "File search", search_start, f"({len(bestanden)} files)")
+            
             print(f"📄 {len(bestanden)} taak bestanden gevonden")
 
-            return self._verrijk_bestanden(bestanden)
+            # Verrijk bestanden
+            enrich_start = time.time()
+            result = self._verrijk_bestanden(bestanden)
+            log_timing(self, "File enrichment", enrich_start, f"({len(result)} files)")
+            log_timing(self, "Total task-only search", start_time)
+
+            return result
 
         except Exception as e:
             print(f"❌ Fout: {e}")
             return []
 
+    @timing_decorator("Per-Project Files Search")
     def zoek_per_project(self, project_naam_of_id):
         """
         Zoek bestanden in specifiek project
         """
+        start_time = time.time()
         try:
+            project_start = time.time()
             if isinstance(project_naam_of_id, int):
                 project = self.projects[project_naam_of_id]
             else:
@@ -212,93 +288,142 @@ class OdooProjectFileSearchFinal(OdooBase):
                     print(f"❌ Geen project gevonden: {project_naam_of_id}")
                     return []
                 project = project_result[0] if isinstance(project_result, list) else project_result
+            log_timing(self, "Project lookup", project_start)
 
             print(f"🔍 Zoeken in project: {project.name} (ID: {project.id})")
 
             # Zoek taken in dit project
+            task_start = time.time()
             taken = self.tasks.search_records([('project_id', '=', project.id)])
             task_ids = [t.id for t in taken] if taken else []
+            log_timing(self, "Task query", task_start, f"({len(task_ids)} tasks)")
 
             print(f"📋 {len(task_ids)} taken in dit project")
 
             # Bouw domein voor dit project EN zijn taken
+            domain_start = time.time()
             if task_ids:
                 # Project + taken bestanden
                 domain = self._build_working_domain([project.id], task_ids)
             else:
                 # Alleen project bestanden
                 domain = ['&', ('res_model', '=', 'project.project'), ('res_id', '=', project.id)]
+            log_timing(self, "Domain building", domain_start)
 
             print(f"🔧 Domein: {domain}")
 
+            search_start = time.time()
             bestanden = self.attachments.search_records(domain)
+            log_timing(self, "File search", search_start, f"({len(bestanden)} files)")
+            
             print(f"📄 {len(bestanden)} bestanden gevonden")
 
-            return self._verrijk_bestanden(bestanden)
+            # Verrijk bestanden
+            enrich_start = time.time()
+            result = self._verrijk_bestanden(bestanden)
+            log_timing(self, "File enrichment", enrich_start, f"({len(result)} files)")
+            log_timing(self, "Total per-project search", start_time)
+
+            return result
 
         except Exception as e:
             print(f"❌ Fout bij project zoeken: {e}")
             return []
 
+    @timing_decorator("Recent Files Search")
     def zoek_recente_bestanden(self, dagen=7):
         """
         Zoek recent toegevoegde bestanden
         """
+        start_time = time.time()
         print(f"🔍 Zoeken naar bestanden van laatste {dagen} dagen")
 
         try:
             cutoff_date = datetime.now() - timedelta(days=dagen)
 
             # Alle project/task IDs
+            query_start = time.time()
             project_ids = [p.id for p in self.projects.search_records([])]
             task_ids = [t.id for t in self.tasks.search_records([])]
+            log_timing(self, "Project/Task ID query", query_start, f"({len(project_ids)} projects, {len(task_ids)} tasks)")
 
             # Bouw domein met datum filter
+            domain_start = time.time()
             base_domain = self._build_working_domain(project_ids, task_ids)
             final_domain = self._add_filters(base_domain, date_from=cutoff_date)
+            log_timing(self, "Domain building", domain_start)
 
             print(f"🔧 Domein: {final_domain}")
 
+            search_start = time.time()
             bestanden = self.attachments.search_records(final_domain)
+            log_timing(self, "File search", search_start, f"({len(bestanden)} files)")
+            
             print(f"📄 {len(bestanden)} recente bestanden gevonden")
 
-            return self._verrijk_bestanden(bestanden)
+            # Verrijk bestanden
+            enrich_start = time.time()
+            result = self._verrijk_bestanden(bestanden)
+            log_timing(self, "File enrichment", enrich_start, f"({len(result)} files)")
+            log_timing(self, "Total recent files search", start_time)
+
+            return result
 
         except Exception as e:
             print(f"❌ Fout: {e}")
             return []
 
+    @timing_decorator("MIME Type Files Search")
     def zoek_per_bestandstype(self, mime_type):
         """
         Zoek bestanden op MIME type
         """
+        start_time = time.time()
         print(f"🔍 Zoeken naar bestanden van type: {mime_type}")
 
         try:
+            query_start = time.time()
             project_ids = [p.id for p in self.projects.search_records([])]
             task_ids = [t.id for t in self.tasks.search_records([])]
+            log_timing(self, "Project/Task ID query", query_start, f"({len(project_ids)} projects, {len(task_ids)} tasks)")
 
+            domain_start = time.time()
             base_domain = self._build_working_domain(project_ids, task_ids)
             final_domain = self._add_filters(base_domain, bestandstype=mime_type)
+            log_timing(self, "Domain building", domain_start)
 
             print(f"🔧 Domein: {final_domain}")
 
+            search_start = time.time()
             bestanden = self.attachments.search_records(final_domain)
+            log_timing(self, "File search", search_start, f"({len(bestanden)} files)")
+            
             print(f"📄 {len(bestanden)} bestanden van type {mime_type} gevonden")
 
-            return self._verrijk_bestanden(bestanden)
+            # Verrijk bestanden
+            enrich_start = time.time()
+            result = self._verrijk_bestanden(bestanden)
+            log_timing(self, "File enrichment", enrich_start, f"({len(result)} files)")
+            log_timing(self, "Total MIME type search", start_time)
+
+            return result
 
         except Exception as e:
             print(f"❌ Fout: {e}")
             return []
 
+    @timing_decorator("File Enrichment")
     def _verrijk_bestanden(self, bestanden):
         """
         Verrijk bestanden met project en taak informatie
         """
+        start_time = time.time()
         verrijkte_bestanden = []
 
-        for bestand in bestanden:
+        for i, bestand in enumerate(bestanden):
+            if self.verbose and i % 50 == 0:
+                print(f"   Processing file {i+1}/{len(bestanden)}")
+            
             try:
                 verrijkt = {'id': bestand.id, 'naam': bestand.name, 'type_mime': bestand.mimetype or 'Onbekend', 'grootte': bestand.file_size or 0,
                     'grootte_human': self.format_file_size(bestand.file_size or 0),
@@ -333,6 +458,7 @@ class OdooProjectFileSearchFinal(OdooBase):
                 verrijkte_bestanden.append({'id': bestand.id, 'naam': getattr(bestand, 'name', 'Onbekend'), 'fout': f'Verrijking gefaald: {e}'})
                 continue
 
+        log_timing(self, "File enrichment processing", start_time, f"({len(verrijkte_bestanden)} files)")
         return verrijkte_bestanden
 
     def download_bestand(self, attachment_id, output_path):
