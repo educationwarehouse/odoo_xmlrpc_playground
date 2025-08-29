@@ -40,30 +40,19 @@ class OdooBase:
         
         self.verbose = verbose
 
-        # Check for .env files in expected locations
-        cwd_dotenv = Path.cwd() / '.env'
+        # Only use config directory location
         config_dotenv = Path.home() / ".config/edwh/edwh_odoo_plugin.env"
         
-        env_file_found = None
-        if cwd_dotenv.exists():
-            env_file_found = cwd_dotenv
-            if self.verbose:
-                print(f"📁 Loading configuration from: {cwd_dotenv.absolute()}")
-        elif config_dotenv.exists():
-            env_file_found = config_dotenv
+        if config_dotenv.exists():
+            load_dotenv(config_dotenv)
             if self.verbose:
                 print(f"📁 Loading configuration from: {config_dotenv.absolute()}")
-        
-        if env_file_found:
-            load_dotenv(env_file_found)
         else:
-            print(f"❌ No .env configuration file found!")
-            print(f"   Searched in:")
-            print(f"   1. {cwd_dotenv.absolute()}")
-            print(f"   2. {config_dotenv.absolute()}")
+            print(f"❌ No configuration file found!")
+            print(f"   Expected location: {config_dotenv.absolute()}")
             print(f"")
             print(f"   Please run: edwh odoo.setup")
-            raise FileNotFoundError("No .env configuration file found. Run 'edwh odoo.setup' to create one.")
+            raise FileNotFoundError("No configuration file found. Run 'edwh odoo.setup' to create one.")
 
         self.host = os.getenv('ODOO_HOST')
         self.database = os.getenv('ODOO_DATABASE')
@@ -81,7 +70,7 @@ class OdooBase:
             
             print(f"❌ Configuration incomplete!")
             print(f"   Missing required variables: {', '.join(missing_vars)}")
-            print(f"   Configuration file: {env_file_found.absolute()}")
+            print(f"   Configuration file: {config_dotenv.absolute()}")
             print(f"")
             print(f"   Please run: edwh odoo.setup")
             raise ValueError(f"Missing required configuration variables: {', '.join(missing_vars)}. Run 'edwh odoo.setup' to configure.")
@@ -168,19 +157,12 @@ class OdooBase:
 def create_env_file(env_path=None):
     """
     Create .env file with configuration template
-    Uses same logic as setup function to determine location
+    Always uses config directory location
     """
     from pathlib import Path
     
     if env_path is None:
-        # Use same logic as setup function
-        cwd_dotenv = Path.cwd() / '.env'
-        config_dotenv = Path.home() / ".config/edwh/edwh_odoo_plugin.env"
-        
-        if cwd_dotenv.exists():
-            env_path = cwd_dotenv
-        else:
-            env_path = config_dotenv
+        env_path = Path.home() / ".config/edwh/edwh_odoo_plugin.env"
     
     env_content = """# Odoo Configuration
 ODOO_HOST=education-warehouse.odoo.com
@@ -195,7 +177,7 @@ ODOO_PASSWORD=your_api_key_here
         env_path.parent.mkdir(parents=True, exist_ok=True)
         with open(env_path, 'w') as f:
             f.write(env_content)
-        print(f"✅ .env file created with configuration template: {env_path.absolute()}")
+        print(f"✅ Configuration file created: {env_path.absolute()}")
         print("   Please update the credentials and run the script again")
         return False
     return True

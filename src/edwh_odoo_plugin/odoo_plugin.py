@@ -165,34 +165,22 @@ def setup(c: Context,
         print("=" * 50)
     
     try:
-        # Show where we're looking for .env files
-        cwd_dotenv = Path.cwd() / '.env'
+        # Only use config directory location
         config_dotenv = Path.home() / ".config/edwh/edwh_odoo_plugin.env"
-        
-        if verbose:
-            print(f"\n🔍 Searching for .env configuration files:")
-            print(f"   1. Current directory: {cwd_dotenv.absolute()}")
-            print(f"   2. Config directory:  {config_dotenv.absolute()}")
-        
-        # Always use config directory for setup - never create in current directory
         dotenv_path = config_dotenv
         
-        if cwd_dotenv.exists():
-            if verbose:
-                print(f"⚠️  Found .env file in current directory: {cwd_dotenv.absolute()}")
-                print(f"   Setup will create/update config file instead: {config_dotenv.absolute()}")
-            else:
-                print(f"⚠️  Found local .env file, but setup will use config directory")
+        if verbose:
+            print(f"\n📁 Configuration file location: {config_dotenv.absolute()}")
         
         if config_dotenv.exists():
             if verbose:
-                print(f"✅ Found existing config file: {config_dotenv.absolute()}")
+                print(f"✅ Found existing config file")
             else:
                 print(f"📁 Using config file: {config_dotenv.absolute()}")
         else:
             dotenv_path.parent.mkdir(parents=True, exist_ok=True)
             if verbose:
-                print(f"📝 Will create new config file: {config_dotenv.absolute()}")
+                print(f"📝 Will create new config file")
             else:
                 print(f"📝 Will create new config file: {config_dotenv.absolute()}")
 
