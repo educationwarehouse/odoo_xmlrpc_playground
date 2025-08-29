@@ -124,3 +124,50 @@ def search(c: Context,
         if verbose:
             import traceback
             print(f"   Traceback: {traceback.format_exc()}")
+
+
+@task(
+    help={
+        'host': 'Host to bind to (default: localhost)',
+        'port': 'Port to bind to (default: 1900)',
+        'browser': 'Open browser automatically (default: False)',
+        'verbose': 'Show detailed server information'
+    }
+)
+def web(c: Context,
+        host='localhost',
+        port=1900,
+        browser=False,
+        verbose=False):
+    """
+    Start Odoo Web Search Server - Web interface for Odoo text search
+    
+    Examples:
+        edwh odoo.web
+        edwh odoo.web --port 8080 --host 0.0.0.0
+        edwh odoo.web --browser
+    """
+    from .web_search_server import WebSearchServer
+    import os
+    
+    if verbose:
+        print("🚀 Starting Odoo Web Search Server")
+        print("=" * 50)
+    
+    # Check if .env file exists
+    if not os.path.exists('.env'):
+        print("⚠️  No .env file found. You can configure settings through the web interface.")
+        print("   Or create a .env file with your Odoo credentials.")
+    
+    try:
+        # Start server
+        server = WebSearchServer(host=host, port=int(port))
+        server.start(open_browser=browser)
+        
+    except KeyboardInterrupt:
+        print(f"\n🛑 Server stopped by user")
+    except Exception as e:
+        print(f"❌ Server error: {e}")
+        if verbose:
+            import traceback
+            print(f"   Traceback: {traceback.format_exc()}")
