@@ -48,6 +48,12 @@ def search(c: Context,
     from .text_search import OdooTextSearch
     import os
     
+    # Validate search type
+    valid_types = ['all', 'projects', 'tasks', 'logs', 'files']
+    if type not in valid_types:
+        print(f"❌ Error: Invalid search type '{type}'. Valid types are: {', '.join(valid_types)}")
+        return
+    
     # Handle files-only flag
     if files_only:
         type = 'files'

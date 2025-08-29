@@ -772,6 +772,11 @@ class OdooTextSearch(OdooBase):
             file_types: List of file extensions to filter by
             limit: Maximum number of results per category
         """
+        # Validate search type
+        valid_types = ['all', 'projects', 'tasks', 'logs', 'files']
+        if search_type not in valid_types:
+            raise ValueError(f"Invalid search type '{search_type}'. Valid types are: {', '.join(valid_types)}")
+        
         if self.verbose:
             print(f"\n🚀 FULL TEXT SEARCH")
             print(f"=" * 60)
