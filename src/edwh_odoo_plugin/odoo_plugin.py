@@ -219,12 +219,14 @@ def setup(c: Context,
         odoo_host = edwh.check_env(
             key="ODOO_HOST",
             default="your-odoo-instance.odoo.com",
-            comment="Odoo server hostname (e.g., your-company.odoo.com)"
+            comment="Odoo server hostname (e.g., your-company.odoo.com)",
+            env_path=dotenv_path,
         )
         
         odoo_port = edwh.check_env(
             key="ODOO_PORT",
             default="443",
+            env_path=dotenv_path,
             comment="Odoo server port (443 for HTTPS, 80 for HTTP, 8069 for development)"
         )
         
@@ -232,24 +234,28 @@ def setup(c: Context,
             key="ODOO_PROTOCOL",
             default="xml-rpcs",
             comment="Odoo protocol (xml-rpcs for HTTPS, xml-rpc for HTTP)",
+            env_path=dotenv_path,
             allowed_values=("xml-rpc", "xml-rpcs")
         )
         
         odoo_database = edwh.check_env(
             key="ODOO_DATABASE", 
             default="your-database-name",
+            env_path=dotenv_path,
             comment="Odoo database name"
         )
         
         odoo_user = edwh.check_env(
             key="ODOO_USER",
             default="your-username@company.com",
+            env_path=dotenv_path,
             comment="Odoo username/email"
         )
         
         odoo_password = edwh.check_env(
             key="ODOO_PASSWORD",
             default="",
+            env_path=dotenv_path,
             comment="Odoo password"
         )
         
