@@ -1,4 +1,4 @@
-from edwh import task
+from edwh import improved_task as task
 from invoke import Context
 import threading
 import webbrowser
@@ -20,7 +20,9 @@ import time
         'download_path': 'Directory to download files to (default: ./downloads/)',
         'stats': 'Show file statistics (when files are included)',
         'verbose': 'Show detailed search information and debug output'
-    }, positional=['search_term']
+    }, 
+    positional=['search_term'],
+    hookable=True
 )
 def search(c: Context, 
           search_term,
@@ -119,11 +121,24 @@ def search(c: Context,
         
         print(f"\n✅ Search completed successfully!")
         
+        # Return results for potential use by other tasks (EDWH hookable pattern)
+        return {
+            'success': True,
+            'results': results,
+            'total_found': sum(len(results.get(key, [])) for key in ['projects', 'tasks', 'messages', 'files'])
+        }
+        
     except Exception as e:
         print(f"❌ Error: {e}")
         if verbose:
             import traceback
             print(f"   Traceback: {traceback.format_exc()}")
+        
+        # Return error state for hookable tasks
+        return {
+            'success': False,
+            'error': str(e)
+        }
 
 
 @task(
@@ -132,7 +147,8 @@ def search(c: Context,
         'port': 'Port to bind to (default: 1900)',
         'browser': 'Open browser automatically (default: False)',
         'verbose': 'Show detailed server information'
-    }
+    },
+    hookable=True
 )
 def web(c: Context,
         host='localhost',
@@ -164,10 +180,26 @@ def web(c: Context,
         server = WebSearchServer(host=host, port=int(port))
         server.start(open_browser=browser)
         
+        return {
+            'success': True,
+            'message': 'Server started successfully',
+            'host': host,
+            'port': port
+        }
+        
     except KeyboardInterrupt:
         print(f"\n🛑 Server stopped by user")
+        return {
+            'success': True,
+            'message': 'Server stopped by user'
+        }
     except Exception as e:
         print(f"❌ Server error: {e}")
         if verbose:
             import traceback
             print(f"   Traceback: {traceback.format_exc()}")
+        
+        return {
+            'success': False,
+            'error': str(e)
+        }
