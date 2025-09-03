@@ -44,6 +44,15 @@ warnings.filterwarnings("ignore",
                       message="pkg_resources is deprecated as an API.*",
                       category=UserWarning)
 
+# Import ConfigManager from odoo_base
+try:
+    from .odoo_base import ConfigManager, OdooBase
+except ImportError:
+    try:
+        from edwh_odoo_plugin.odoo_base import ConfigManager, OdooBase
+    except ImportError:
+        from odoo_base import ConfigManager, OdooBase
+
 
 class WebSearchHandler(BaseHTTPRequestHandler):
     """HTTP request handler for the web search interface"""
@@ -566,13 +575,6 @@ except Exception as e:
             
             # Create temporary base connection for download (downloads are infrequent)
             try:
-                try:
-                    from .odoo_base import OdooBase
-                except ImportError:
-                    try:
-                        from edwh_odoo_plugin.odoo_base import OdooBase
-                    except ImportError:
-                        from odoo_base import OdooBase
                 odoo_base = OdooBase(verbose=False)
             except Exception as e:
                 self.send_json_response({'error': f'Failed to connect to Odoo: {str(e)}'}, 500)
@@ -634,12 +636,28 @@ except Exception as e:
     def handle_settings_get(self):
         """Handle GET request for settings"""
         try:
-            settings = {
-                'host': os.getenv('ODOO_HOST', ''),
-                'database': os.getenv('ODOO_DATABASE', ''),
-                'user': os.getenv('ODOO_USER', ''),
-                'password': '***' if os.getenv('ODOO_PASSWORD') else ''
-            }
+            # Use ConfigManager to load current configuration
+            try:
+                config = ConfigManager.load_config(verbose=False)
+                settings = {
+                    'host': config.get('host', ''),
+                    'database': config.get('database', ''),
+                    'user': config.get('user', ''),
+                    'password': '***' if config.get('password') else '',
+                    'port': config.get('port', 443),
+                    'protocol': config.get('protocol', 'xml-rpcs')
+                }
+            except (FileNotFoundError, ValueError):
+                # No config file exists yet
+                settings = {
+                    'host': '',
+                    'database': '',
+                    'user': '',
+                    'password': '',
+                    'port': 443,
+                    'protocol': 'xml-rpcs'
+                }
+            
             self.send_json_response({'success': True, 'settings': settings})
         except Exception as e:
             self.send_json_response({'error': str(e)}, 500)
@@ -651,10 +669,16 @@ except Exception as e:
             post_data = self.rfile.read(content_length)
             data = json.loads(post_data.decode('utf-8'))
             
-            # Update .env file
+            # Get the config file path using ConfigManager
+            config_path = ConfigManager.get_config_path()
+            
+            # Ensure the config directory exists
+            config_path.parent.mkdir(parents=True, exist_ok=True)
+            
+            # Read existing config if it exists
             env_lines = []
-            if os.path.exists('.env'):
-                with open('.env', 'r') as f:
+            if config_path.exists():
+                with open(config_path, 'r') as f:
                     env_lines = f.readlines()
             
             # Update or add settings
@@ -662,6 +686,8 @@ except Exception as e:
                 'ODOO_HOST': data.get('host', ''),
                 'ODOO_DATABASE': data.get('database', ''),
                 'ODOO_USER': data.get('user', ''),
+                'ODOO_PORT': data.get('port', '443'),
+                'ODOO_PROTOCOL': data.get('protocol', 'xml-rpcs')
             }
             
             # Only update password if provided
@@ -684,17 +710,15 @@ except Exception as e:
                 if key not in updated_keys and value:
                     env_lines.append(f'{key}={value}\n')
             
-            # Write back to .env
-            with open('.env', 'w') as f:
+            # Write back to config file
+            with open(config_path, 'w') as f:
                 f.writelines(env_lines)
             
             # Reload environment variables
             from dotenv import load_dotenv
-            load_dotenv(override=True)
+            load_dotenv(config_path, override=True)
             
-            # Note: No need to reset searcher since each search uses a new process
-            
-            self.send_json_response({'success': True, 'message': 'Settings updated and server reloaded successfully'})
+            self.send_json_response({'success': True, 'message': 'Settings updated successfully'})
             
         except Exception as e:
             self.send_json_response({'error': str(e)}, 500)
@@ -1521,6 +1545,19 @@ except Exception as e:
                         <input type="password" id="odooPassword" name="password" placeholder="Leave empty to keep current">
                     </div>
                     <div class="form-row">
+                        <div class="form-group small">
+                            <label for="odooPort">Port</label>
+                            <input type="number" id="odooPort" name="port" placeholder="443" value="443">
+                        </div>
+                        <div class="form-group small">
+                            <label for="odooProtocol">Protocol</label>
+                            <select id="odooProtocol" name="protocol">
+                                <option value="xml-rpcs">xml-rpcs (HTTPS)</option>
+                                <option value="xml-rpc">xml-rpc (HTTP)</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="form-row">
                         <button type="submit" class="btn btn-primary">💾 Save Settings</button>
                     </div>
                 </form>
@@ -1707,6 +1744,8 @@ except Exception as e:
                         document.getElementById('odooDatabase').value = data.settings.database || '';
                         document.getElementById('odooUser').value = data.settings.user || '';
                         document.getElementById('odooPassword').placeholder = data.settings.password ? 'Password is set (leave empty to keep current)' : 'Enter password';
+                        document.getElementById('odooPort').value = data.settings.port || '443';
+                        document.getElementById('odooProtocol').value = data.settings.protocol || 'xml-rpcs';
                     }
                 })
                 .catch(error => console.error('Error loading settings:', error));
@@ -2371,10 +2410,19 @@ Examples:
     
     args = parser.parse_args()
     
-    # Check if .env file exists
-    if not os.path.exists('.env'):
-        print("⚠️  No .env file found. You can configure settings through the web interface.")
-        print("   Or create a .env file with your Odoo credentials.")
+    # Check if config file exists using ConfigManager
+    config_path = ConfigManager.get_config_path()
+    if not config_path.exists():
+        print(f"⚠️  No configuration file found at: {config_path}")
+        print("   You can configure settings through the web interface.")
+        print("   Or run: edwh odoo.setup")
+    else:
+        try:
+            ConfigManager.load_config(verbose=False)
+            print("✅ Configuration loaded successfully")
+        except Exception as e:
+            print(f"⚠️  Configuration error: {e}")
+            print("   You can fix settings through the web interface.")
     
     # Start server
     server = WebSearchServer(host=args.host, port=args.port)
