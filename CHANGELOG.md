@@ -2,6 +2,32 @@
 
 <!--next-version-placeholder-->
 
+## v0.2.0 (2025-09-03)
+
+### Feature
+
+* Add comprehensive timing instrumentation to search methods ([`ce03c7a`](https://github.com/educationwarehouse/odoo_xmlrpc_playground/commit/ce03c7aa3afabe673186e772c2168930e6fb1c90))
+* Add markdown2 dependency and implement markdown_to_html method ([`66bb8ce`](https://github.com/educationwarehouse/odoo_xmlrpc_playground/commit/66bb8ce766380be204486512a76b2de2b4109972))
+* Add dotenv path support to odoo plugin setup ([`adf56ba`](https://github.com/educationwarehouse/odoo_xmlrpc_playground/commit/adf56baf1f7115bccd713a3673389fa0f5a5aec0))
+* Enhance setup function to display .env file search locations and usage ([`59171d3`](https://github.com/educationwarehouse/odoo_xmlrpc_playground/commit/59171d322c6d2dcb1bc29c511a05566259c8bafc))
+* Add configuration change detection to setup function ([`9a4deb8`](https://github.com/educationwarehouse/odoo_xmlrpc_playground/commit/9a4deb89f54d032d184a3ab4bd080b4da84bcc61))
+* Make Odoo connection port and protocol configurable ([`0ebcb80`](https://github.com/educationwarehouse/odoo_xmlrpc_playground/commit/0ebcb808e4e570d3e172ef63af6251fd21587641))
+* Update setup task to support new Odoo environment variable structure with password authentication ([`9df7d10`](https://github.com/educationwarehouse/odoo_xmlrpc_playground/commit/9df7d105778fb8aae1e043eab23139acc1adf674))
+* Enhance odoo setup task with interactive configuration and connection testing ([`a7b053b`](https://github.com/educationwarehouse/odoo_xmlrpc_playground/commit/a7b053ba48756eb325e57cede9b37747c528b486))
+* Add setup task to create .env configuration file ([`ebd298f`](https://github.com/educationwarehouse/odoo_xmlrpc_playground/commit/ebd298f0f8ed7ff6de0eac93293f11556a56445a))
+
+### Fix
+
+* Correct search/replace blocks to match exact file content ([`2750207`](https://github.com/educationwarehouse/odoo_xmlrpc_playground/commit/275020705c496c4b85701923b6270fc3ed4a20b5))
+* Ensure odoo config validation checks for non-empty values ([`4f72a66`](https://github.com/educationwarehouse/odoo_xmlrpc_playground/commit/4f72a66e042c7c478960bbc6540e4e3c9d77f58f))
+* Remove create_env_file function to prevent dummy config creation ([`7001568`](https://github.com/educationwarehouse/odoo_xmlrpc_playground/commit/7001568981fee9acffe7492a1ad6c1ea89936f47))
+* Prevent .env file creation when config is already complete ([`303ae6f`](https://github.com/educationwarehouse/odoo_xmlrpc_playground/commit/303ae6fd4ff874e223bd395a054f583533ebdf94))
+* Prevent setup from using current directory .env file ([`00789f9`](https://github.com/educationwarehouse/odoo_xmlrpc_playground/commit/00789f92829898bdb263e66fd6b45c50eca75300))
+* Prevent creation of empty .env file in cwd during setup ([`022d831`](https://github.com/educationwarehouse/odoo_xmlrpc_playground/commit/022d831c5d05223f37323e34e4c64bcfe6e7e627))
+* Prevent .env creation during init and improve error handling ([`9bbbf2c`](https://github.com/educationwarehouse/odoo_xmlrpc_playground/commit/9bbbf2c5f3de51ff3fbf7e6cdd904b0b7c2f3a2d))
+* Ensure .env file creation respects config directory preference ([`5ea67a9`](https://github.com/educationwarehouse/odoo_xmlrpc_playground/commit/5ea67a944862d39090b99ee5e069c26bb02b8c3e))
+* Suppress pkg_resources deprecation warning in search function ([`ba11c9d`](https://github.com/educationwarehouse/odoo_xmlrpc_playground/commit/ba11c9df10c2161a9c2b814ac7844b31295ec4d7))
+
 ## v0.1.0 (2025-08-29)
 
 ### Feature
