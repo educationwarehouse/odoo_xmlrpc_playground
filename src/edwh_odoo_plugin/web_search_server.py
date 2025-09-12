@@ -3978,8 +3978,9 @@ except Exception as e:
             e.preventDefault();
             const targetNode = e.target.closest('.tree-node');
             
-            // Capture the draggedTaskId immediately before any async operations
+            // Capture the draggedTaskId and oldParentId immediately before any async operations
             const taskIdToMove = draggedTaskId;
+            const oldParentId = draggedElement.closest('.tree-node[data-type="task"]')?.dataset.taskId || 'root';
             
             if (!targetNode || !draggedElement || targetNode === draggedElement) {
                 console.log('Drop cancelled: invalid target or same element');
@@ -4063,7 +4064,7 @@ except Exception as e:
             const confirmed = await showModal('Move Task', message, 'Move', 'Cancel');
             
             if (confirmed) {
-                performTaskMove(taskIdToMove, newParentId, targetTaskId);
+                performTaskMove(taskIdToMove, newParentId, targetTaskId, oldParentId);
             }
             
             // Clean up
@@ -4091,9 +4092,9 @@ except Exception as e:
             return false;
         }
         
-        function performTaskMove(taskId, newParentId, targetTaskId) {
+        function performTaskMove(taskId, newParentId, targetTaskId, oldParentId) {
             // Validate inputs before making API call
-            console.log('🔄 performTaskMove called with:', { taskId, newParentId, targetTaskId });
+            console.log('🔄 performTaskMove called with:', { taskId, newParentId, targetTaskId, oldParentId });
             
             // Strict validation
             if (!taskId || taskId === 'null' || taskId === 'undefined' || taskId === 'unknown' || !/^\d+$/.test(taskId)) {
@@ -4135,7 +4136,7 @@ except Exception as e:
                         // Store for undo
                         lastMoveOperation = {
                             taskId: taskId,
-                            oldParentId: draggedElement.closest('.tree-node[data-type="task"]')?.dataset.taskId || 'root',
+                            oldParentId: oldParentId,
                             newParentId: newParentId,
                             timestamp: Date.now()
                         };
