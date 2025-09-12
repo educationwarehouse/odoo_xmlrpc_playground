@@ -779,7 +779,141 @@ class TaskManager(OdooBase):
                 pass
         
         # Add priority
-        if hasattr(task, 'priority'):
-            task_dict['priority'] = getattr(task, 'priority', '0')
+        task_dict['priority'] = getattr(task, 'priority', '0')
+        
+        # Add state/status info
+        if hasattr(task, 'state'):
+            task_dict['state'] = getattr(task, 'state', 'draft')
+        
+        # Add kanban state (if available)
+        if hasattr(task, 'kanban_state'):
+            task_dict['kanban_state'] = getattr(task, 'kanban_state', 'normal')
+        
+        # Add date information
+        if hasattr(task, 'date_deadline') and task.date_deadline:
+            task_dict['deadline'] = str(task.date_deadline)
+        
+        # Add description
+        if hasattr(task, 'description') and task.description:
+            task_dict['description'] = task.description
         
         return task_dict
+
+    def _print_task_details(self, task, indent):
+        """Print detailed task information with proper indentation"""
+        # Assigned user
+        if task.get('user') and task['user'] != 'Unassigned':
+            print(f"{indent}👤 {task['user']}")
+        
+        # Stage/Status
+        if task.get('stage_name') and task['stage_name'] not in ['Unknown', 'No stage']:
+            print(f"{indent}📊 {task['stage_name']}")
+        
+        # Priority (convert to 3-star system)
+        priority_value = task.get('priority', '0')
+        if priority_value and priority_value != '0':
+            priority_stars = self._convert_priority_to_stars(priority_value)
+            print(f"{indent}🔥 {priority_stars}")
+        
+        # Deadline
+        if task.get('deadline'):
+            print(f"{indent}📅 Deadline: {task['deadline']}")
+        
+        # State/Kanban state
+        if task.get('state') and task['state'] != 'draft':
+            print(f"{indent}🏷️ State: {task['state']}")
+        
+        if task.get('kanban_state') and task['kanban_state'] != 'normal':
+            print(f"{indent}🎯 Status: {task['kanban_state']}")
+        
+        # Blocking relationships
+        blocking_info = self._get_blocking_info(task['id'])
+        if blocking_info['blocking'] or blocking_info['blocked_by']:
+            if blocking_info['blocking']:
+                print(f"{indent}🚫 Blocking: {', '.join(map(str, blocking_info['blocking']))}")
+            if blocking_info['blocked_by']:
+                print(f"{indent}⛔ Blocked by: {', '.join(map(str, blocking_info['blocked_by']))}")
+
+    def _convert_priority_to_stars(self, priority_value):
+        """Convert Odoo priority to 3-star system"""
+        try:
+            priority = int(priority_value)
+            if priority == 0:
+                return "☆☆☆ (Normal)"
+            elif priority == 1:
+                return "★☆☆ (High)"
+            elif priority == 2:
+                return "★★☆ (Urgent)"
+            elif priority >= 3:
+                return "★★★ (Critical)"
+            else:
+                return f"☆☆☆ ({priority})"
+        except (ValueError, TypeError):
+            return f"☆☆☆ ({priority_value})"
+
+    def _get_blocking_info(self, task_id):
+        """Get blocking and blocked-by relationships for a task"""
+        blocking_info = {
+            'blocking': [],
+            'blocked_by': []
+        }
+        
+        try:
+            # Get the task record to check for dependency fields
+            task_records = self.tasks.search_records([('id', '=', task_id)])
+            if not task_records:
+                return blocking_info
+            
+            task = task_records[0]
+            
+            # Check for common dependency field names
+            dependency_fields = [
+                'depend_on_ids',  # Tasks this task depends on (blocked by)
+                'blocking_task_ids',  # Tasks this task is blocking
+                'predecessor_ids',  # Predecessors (blocked by)
+                'successor_ids',  # Successors (blocking)
+                'dependency_ids',  # General dependencies
+                'blocked_by_ids',  # Explicitly blocked by
+                'blocking_ids'  # Explicitly blocking
+            ]
+            
+            for field_name in dependency_fields:
+                if hasattr(task, field_name):
+                    try:
+                        field_value = getattr(task, field_name)
+                        if field_value:
+                            # Extract IDs from the field
+                            ids = []
+                            if hasattr(field_value, '__iter__'):
+                                for item in field_value:
+                                    if hasattr(item, 'id'):
+                                        ids.append(item.id)
+                                    elif isinstance(item, int):
+                                        ids.append(item)
+                            elif hasattr(field_value, 'id'):
+                                ids.append(field_value.id)
+                            elif isinstance(field_value, int):
+                                ids.append(field_value)
+                            
+                            # Categorize based on field name
+                            if 'depend' in field_name or 'predecessor' in field_name or 'blocked_by' in field_name:
+                                blocking_info['blocked_by'].extend(ids)
+                            elif 'blocking' in field_name or 'successor' in field_name:
+                                blocking_info['blocking'].extend(ids)
+                            
+                            if self.verbose and ids:
+                                print(f"   Found {field_name}: {ids}")
+                                
+                    except Exception as field_error:
+                        if self.verbose:
+                            print(f"   Error accessing {field_name}: {field_error}")
+            
+            # Remove duplicates
+            blocking_info['blocking'] = list(set(blocking_info['blocking']))
+            blocking_info['blocked_by'] = list(set(blocking_info['blocked_by']))
+            
+        except Exception as e:
+            if self.verbose:
+                print(f"⚠️ Error getting blocking info for task {task_id}: {e}")
+        
+        return blocking_info
