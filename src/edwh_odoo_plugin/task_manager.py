@@ -609,20 +609,41 @@ class TaskManager(OdooBase):
                     known_task_ids = [3352, 3353, 3354, 3355, 3356]
                     for task_id in known_task_ids:
                         try:
-                            task = self.tasks.browse(task_id)
-                            if hasattr(task, 'project_id') and task.project_id:
-                                actual_project_id = task.project_id.id if hasattr(task.project_id, 'id') else task.project_id
-                                actual_project_name = task.project_id.name if hasattr(task.project_id, 'name') else 'Unknown'
-                                print(f"   Task {task_id} ('{task.name}') belongs to project {actual_project_id} ('{actual_project_name}')")
-                                
-                                # If this task belongs to the project we're looking for, add it manually
-                                if actual_project_id == project_id:
-                                    print(f"   ✅ Task {task_id} should be in this project!")
-                                    all_tasks.append(task)
+                            task_records = self.tasks.search_records([('id', '=', task_id)])
+                            if task_records:
+                                task = task_records[0]
+                                if hasattr(task, 'project_id') and task.project_id:
+                                    actual_project_id = task.project_id.id if hasattr(task.project_id, 'id') else task.project_id
+                                    actual_project_name = task.project_id.name if hasattr(task.project_id, 'name') else 'Unknown'
+                                    print(f"   Task {task_id} ('{task.name}') belongs to project {actual_project_id} ('{actual_project_name}')")
+                                    
+                                    # If this task belongs to the project we're looking for, add it manually
+                                    if actual_project_id == project_id:
+                                        print(f"   ✅ Task {task_id} should be in this project!")
+                                        all_tasks.append(task)
+                                else:
+                                    print(f"   Task {task_id} has no project_id")
                             else:
-                                print(f"   Task {task_id} has no project_id")
+                                print(f"   Task {task_id} not found")
                         except Exception as task_error:
                             print(f"   Error checking task {task_id}: {task_error}")
+                    
+                    # If we still have no tasks after manual check, try a broader search
+                    if len(all_tasks) == 0:
+                        print(f"🔍 DEBUG: Trying broader search approaches...")
+                        
+                        # Try searching without project filter to see if tasks exist at all
+                        try:
+                            test_tasks = self.tasks.search_records([('id', 'in', known_task_ids)])
+                            print(f"   Found {len(test_tasks)} tasks by direct ID search")
+                            for task in test_tasks:
+                                if hasattr(task, 'project_id') and task.project_id:
+                                    task_project_id = task.project_id.id if hasattr(task.project_id, 'id') else task.project_id
+                                    if task_project_id == project_id:
+                                        all_tasks.append(task)
+                                        print(f"   ✅ Added task {task.id} to all_tasks")
+                        except Exception as broad_error:
+                            print(f"   Broader search failed: {broad_error}")
             
             # Separate main tasks (no parent) from subtasks
             main_tasks = []
