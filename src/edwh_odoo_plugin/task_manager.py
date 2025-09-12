@@ -464,6 +464,10 @@ class TaskManager(OdooBase):
             task_link = self.create_terminal_link(task_url, child['name'])
             print(f"{indent}{current_indent} {task_link} (ID: {child['id']})")
             
+            # Print detailed task information for child
+            detail_indent = indent + ("   " if is_last else "│  ")
+            self._print_task_details(child, detail_indent)
+            
             if child.get('children'):
                 next_indent = indent + ("   " if is_last else "│  ")
                 self._print_children_recursive(child['children'], next_indent)
@@ -700,10 +704,9 @@ class TaskManager(OdooBase):
                 task_link = self.create_terminal_link(task_url, main_task['name'])
                 print(f"{main_prefix} {task_link} (ID: {main_task['id']})")
                 
-                # Print task details
-                if main_task.get('user'):
-                    indent = "   " if is_last_main else "│  "
-                    print(f"{indent} 👤 {main_task['user']}")
+                # Print detailed task information
+                indent = "   " if is_last_main else "│  "
+                self._print_task_details(main_task, indent)
                 
                 # Print children
                 if main_task.get('children'):
