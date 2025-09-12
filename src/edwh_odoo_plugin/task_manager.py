@@ -642,6 +642,27 @@ class TaskManager(OdooBase):
                                     if task_project_id == project_id:
                                         all_tasks.append(task)
                                         print(f"   ✅ Added task {task.id} to all_tasks")
+                            
+                            # If we still have no tasks, try a different approach - search all tasks in this project
+                            if len(all_tasks) == 0:
+                                print(f"🔍 DEBUG: Trying alternative project search...")
+                                try:
+                                    # Try different project field approaches
+                                    alt_tasks = self.tasks.search_records([('project_id', '=', int(project_id))])
+                                    print(f"   Alternative search (int project_id): Found {len(alt_tasks)} tasks")
+                                    all_tasks.extend(alt_tasks)
+                                except Exception as alt_error:
+                                    print(f"   Alternative search failed: {alt_error}")
+                                    
+                                    # Last resort: manually add the known tasks that belong to this project
+                                    print(f"🔍 DEBUG: Last resort - manually adding known tasks...")
+                                    for task in test_tasks:
+                                        if hasattr(task, 'project_id') and task.project_id:
+                                            task_project_id = task.project_id.id if hasattr(task.project_id, 'id') else task.project_id
+                                            if task_project_id == project_id:
+                                                all_tasks.append(task)
+                                                print(f"   ✅ Manually added task {task.id}")
+                                        
                         except Exception as broad_error:
                             print(f"   Broader search failed: {broad_error}")
             
