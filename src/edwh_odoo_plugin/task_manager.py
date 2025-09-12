@@ -542,126 +542,20 @@ class TaskManager(OdooBase):
             if self.verbose:
                 print(f"🔍 Looking for children of task {task_id} at depth {current_depth}")
 
-            # First, let's check if we know specific subtasks exist (for debugging)
-            if self.verbose and task_id == 3352:
-                print(f"   Debug: Checking known subtasks 3354, 3355, 3356...")
-                known_subtask_ids = [3354, 3355, 3356]
-                for subtask_id in known_subtask_ids:
-                    try:
-                        subtask = self.tasks.browse(int(subtask_id))
-                        print(f"   Checking subtask {subtask_id}:")
-                        
-                        # Check parent_id field
-                        if hasattr(subtask, 'parent_id'):
-                            parent_value = getattr(subtask, 'parent_id')
-                            print(f"     parent_id raw value: {parent_value}")
-                            print(f"     parent_id type: {type(parent_value)}")
-                            
-                            # Check if it's False (no parent)
-                            if parent_value is False or parent_value is None:
-                                print(f"     parent_id is False/None - no parent")
-                            # Check if it's a Record object
-                            elif hasattr(parent_value, 'id'):
-                                parent_id_value = parent_value.id
-                                print(f"     parent_id.id: {parent_id_value}")
-                                if parent_id_value == task_id:
-                                    print(f"     ✅ Found parent relationship!")
-                            # Check if it's an integer
-                            elif isinstance(parent_value, int):
-                                print(f"     parent_id is int: {parent_value}")
-                                if parent_value == task_id:
-                                    print(f"     ✅ Found parent relationship!")
-                        else:
-                            print(f"     No parent_id field found")
-                            
-                    except Exception as subtask_error:
-                        print(f"   Error checking subtask {subtask_id}: {subtask_error}")
-
-            # Try multiple approaches to find children
-            child_records = []
-
-            # Method 1: Direct parent_id search - try with both int and False handling
-            try:
-                # First try the standard search
-                child_records = self.tasks.search_records([('parent_id', '=', int(task_id))])
-                if self.verbose:
-                    print(f"   Method 1 (parent_id = {task_id}): Found {len(child_records)} children")
-                    if child_records:
-                        for child in child_records:
-                            print(f"     Child: {child.name} (ID: {child.id})")
-            except Exception as e1:
-                if self.verbose:
-                    print(f"   Method 1 failed: {e1}")
-
-            # Method 2: If no children found and we're looking at task 3352, manually add known children
-            if not child_records and task_id == 3352:
-                if self.verbose:
-                    print(f"   Method 2: Manually checking known subtasks for task 3352...")
-                known_subtask_ids = [3354, 3355, 3356]
-                valid_children = []
-                
-                for subtask_id in known_subtask_ids:
-                    try:
-                        # Check if this subtask actually has task_id as parent
-                        subtask_records = self.tasks.search_records([('id', '=', subtask_id)])
-                        if subtask_records:
-                            subtask = subtask_records[0]
-                            if hasattr(subtask, 'parent_id') and subtask.parent_id:
-                                if hasattr(subtask.parent_id, 'id'):
-                                    if subtask.parent_id.id == task_id:
-                                        valid_children.append(subtask)
-                                        if self.verbose:
-                                            print(f"     ✅ Confirmed subtask {subtask_id} is child of {task_id}")
-                                elif subtask.parent_id == task_id:
-                                    valid_children.append(subtask)
-                                    if self.verbose:
-                                        print(f"     ✅ Confirmed subtask {subtask_id} is child of {task_id}")
-                    except Exception as e:
-                        if self.verbose:
-                            print(f"     Error checking subtask {subtask_id}: {e}")
-                
-                if valid_children:
-                    child_records = valid_children
-                    if self.verbose:
-                        print(f"   Method 2: Found {len(child_records)} children through manual check")
-
-            # Method 3: Browse parent and check child_ids field
-            if not child_records:
-                try:
-                    parent_task = self.tasks.browse(int(task_id))
-                    
-                    # Try different child field names
-                    child_field_names = ['child_ids', 'subtask_ids', 'children', 'sub_task_ids']
-                    for field_name in child_field_names:
-                        if hasattr(parent_task, field_name):
-                            try:
-                                field_value = getattr(parent_task, field_name)
-                                if field_value:
-                                    if hasattr(field_value, '__iter__'):
-                                        child_ids = []
-                                        for child in field_value:
-                                            if hasattr(child, 'id'):
-                                                child_ids.append(child.id)
-                                            elif isinstance(child, int):
-                                                child_ids.append(child)
-                                        
-                                        if child_ids:
-                                            child_records = self.tasks.search_records([('id', 'in', child_ids)])
-                                            if self.verbose:
-                                                print(f"   Method 3 ({field_name}): Found {len(child_records)} children")
-                                            break
-                            except Exception as field_error:
-                                if self.verbose:
-                                    print(f"   Method 3 ({field_name}) field access failed: {field_error}")
-                except Exception as e3:
-                    if self.verbose:
-                        print(f"   Method 3 failed: {e3}")
+            # Use the working method: Direct parent_id search with integer task_id
+            child_records = self.tasks.search_records([('parent_id', '=', int(task_id))])
+            
+            if self.verbose:
+                print(f"   Method 1 (parent_id = {task_id}): Found {len(child_records)} children")
+                if child_records:
+                    for child in child_records:
+                        print(f"     Child: {child.name} (ID: {child.id})")
 
             # Process found children
             for child in child_records:
                 child_dict = self._task_to_dict(child)
 
-                # Get grandchildren
+                # Get grandchildren recursively
                 if current_depth + 1 < max_depth:
                     child_dict['children'] = self._get_children_recursive(
                         child.id, max_depth, current_depth + 1
