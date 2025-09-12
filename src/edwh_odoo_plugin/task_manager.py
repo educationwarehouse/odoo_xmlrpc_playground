@@ -34,7 +34,7 @@ class TaskManager(OdooBase):
             self.verbosity_level = 1 if verbose else 0
         
         super().__init__(verbose=verbose)
-        self.searcher = OdooTextSearch(verbose=verbose)
+        self.searcher = OdooTextSearch(verbose=(verbosity_level > 0 if verbosity_level is not None else verbose))
 
     def move_subtask(self, subtask_id, new_parent_id, target_project_id=None):
         """
@@ -466,12 +466,12 @@ class TaskManager(OdooBase):
             is_last = i == len(children) - 1
             current_indent = "└──" if is_last else "├──"
             
-            # Create clickable link for child task
+            # Create clickable link for child task with bold name
             task_url = self.get_task_url(child['id'])
-            task_link = self.create_terminal_link(task_url, child['name'])
+            task_link = self.create_terminal_link(task_url, f"\033[1m{child['name']}\033[0m")
             print(f"{indent}{current_indent} {task_link} (ID: {child['id']})")
             
-            # Print detailed task information for child
+            # Print detailed task information for child on separate line
             detail_indent = indent + ("   " if is_last else "│  ")
             self._print_task_details(child, detail_indent)
             
@@ -684,9 +684,9 @@ class TaskManager(OdooBase):
         """Print project hierarchy as one unified tree with clickable links"""
         project = hierarchy['project']
         
-        # Print project as root of the tree with clickable link
+        # Print project as root of the tree with clickable link and bold name
         project_url = self.get_project_url(project['id'])
-        project_link = self.create_terminal_link(project_url, project['name'])
+        project_link = self.create_terminal_link(project_url, f"\033[1m{project['name']}\033[0m")
         print(f"📂 {project_link} (ID: {project['id']})")
         
         # Print project details based on verbosity level
@@ -715,12 +715,12 @@ class TaskManager(OdooBase):
                 is_last_main = i == len(hierarchy['main_tasks']) - 1
                 main_prefix = "└──" if is_last_main else "├──"
                 
-                # Create clickable link for main task
+                # Create clickable link for main task with bold name
                 task_url = self.get_task_url(main_task['id'])
-                task_link = self.create_terminal_link(task_url, main_task['name'])
+                task_link = self.create_terminal_link(task_url, f"\033[1m{main_task['name']}\033[0m")
                 print(f"{main_prefix} {task_link} (ID: {main_task['id']})")
                 
-                # Print detailed task information
+                # Print detailed task information on separate line
                 indent = "   " if is_last_main else "│  "
                 self._print_task_details(main_task, indent)
                 
@@ -783,10 +783,16 @@ class TaskManager(OdooBase):
             except:
                 pass
         
-        # Add user info - always include for debugging
+        # Add user info - suppress warnings unless debug level
+        old_verbose = self.verbose
+        if self.verbosity_level < 3:
+            self.verbose = False
+        
         user_id, user_name = self.extract_user_from_task(task)
         task_dict['user'] = user_name
         task_dict['user_id'] = user_id
+        
+        self.verbose = old_verbose
         
         # Add stage info - try multiple approaches
         task_dict['stage_name'] = 'No stage'
@@ -895,25 +901,40 @@ class TaskManager(OdooBase):
         # Get blocking info first since it's important at all levels
         blocking_info = self._get_blocking_info(task['id'])
         
-        # Level 0 (default): Essential info with icons, blocking relationships prominent
+        # Level 0 (default): Essential info with icons on one line
         if self.verbosity_level == 0:
+            status_parts = []
+            
             # Blocking relationships - ALWAYS show these FIRST as they're critical
             if blocking_info['blocked_by']:
-                print(f"{indent}⛔ {', '.join(map(str, blocking_info['blocked_by']))}")
+                blocked_by_links = []
+                for task_id in blocking_info['blocked_by']:
+                    task_name = self._get_task_name(task_id)
+                    task_url = self.get_task_url(task_id)
+                    task_link = self.create_terminal_link(task_url, task_name)
+                    blocked_by_links.append(f"{task_id} ({task_link})")
+                status_parts.append(f"⛔ {', '.join(blocked_by_links)}")
+            
             if blocking_info['blocking']:
-                print(f"{indent}🚫 {', '.join(map(str, blocking_info['blocking']))}")
+                blocking_links = []
+                for task_id in blocking_info['blocking']:
+                    task_name = self._get_task_name(task_id)
+                    task_url = self.get_task_url(task_id)
+                    task_link = self.create_terminal_link(task_url, task_name)
+                    blocking_links.append(f"{task_id} ({task_link})")
+                status_parts.append(f"🚫 {', '.join(blocking_links)}")
             
             # Essential info with icons only (no labels)
             if task.get('user') and task['user'] != 'Unassigned':
-                print(f"{indent}👤 {task['user']}")
+                status_parts.append(f"👤 {task['user']}")
             
             if task.get('stage_name') and task['stage_name'] not in ['Unknown', 'No stage']:
-                print(f"{indent}📊 {task['stage_name']}")
+                status_parts.append(f"📊 {task['stage_name']}")
             
             priority_value = task.get('priority', '0')
             if priority_value and priority_value != '0':
                 priority_stars = self._convert_priority_to_stars(priority_value)
-                print(f"{indent}{priority_stars}")  # Just stars, no label
+                status_parts.append(priority_stars)  # Just stars, no label
             
             # State with icon only
             state_value = task.get('state', 'draft')
@@ -924,19 +945,36 @@ class TaskManager(OdooBase):
                     state_display = state_value[3:].replace('_', ' ').title()
                 else:
                     state_display = state_value.replace('_', ' ').title()
-                print(f"{indent}🏷️ {state_display}")
+                status_parts.append(f"🏷️ {state_display}")
             
             # Deadline with icon only
             if task.get('deadline'):
-                print(f"{indent}📅 {task['deadline']}")
+                status_parts.append(f"📅 {task['deadline']}")
+            
+            # Print all status info on one line
+            if status_parts:
+                print(f"{indent}{' • '.join(status_parts)}")
         
         # Level 1 (-v): Show more task details with labels
         elif self.verbosity_level == 1:
             # Blocking relationships - show first as they're critical
             if blocking_info['blocked_by']:
-                print(f"{indent}⛔ Blocked by: {', '.join(map(str, blocking_info['blocked_by']))}")
+                blocked_by_links = []
+                for task_id in blocking_info['blocked_by']:
+                    task_name = self._get_task_name(task_id)
+                    task_url = self.get_task_url(task_id)
+                    task_link = self.create_terminal_link(task_url, task_name)
+                    blocked_by_links.append(f"{task_id} ({task_link})")
+                print(f"{indent}⛔ Blocked by: {', '.join(blocked_by_links)}")
+            
             if blocking_info['blocking']:
-                print(f"{indent}🚫 Blocking: {', '.join(map(str, blocking_info['blocking']))}")
+                blocking_links = []
+                for task_id in blocking_info['blocking']:
+                    task_name = self._get_task_name(task_id)
+                    task_url = self.get_task_url(task_id)
+                    task_link = self.create_terminal_link(task_url, task_name)
+                    blocking_links.append(f"{task_id} ({task_link})")
+                print(f"{indent}🚫 Blocking: {', '.join(blocking_links)}")
             
             # Task details with labels
             if task.get('user') and task['user'] != 'Unassigned':
@@ -970,9 +1008,22 @@ class TaskManager(OdooBase):
         elif self.verbosity_level == 2:
             # Blocking relationships first
             if blocking_info['blocked_by']:
-                print(f"{indent}⛔ Blocked by: {', '.join(map(str, blocking_info['blocked_by']))}")
+                blocked_by_links = []
+                for task_id in blocking_info['blocked_by']:
+                    task_name = self._get_task_name(task_id)
+                    task_url = self.get_task_url(task_id)
+                    task_link = self.create_terminal_link(task_url, task_name)
+                    blocked_by_links.append(f"{task_id} ({task_link})")
+                print(f"{indent}⛔ Blocked by: {', '.join(blocked_by_links)}")
+            
             if blocking_info['blocking']:
-                print(f"{indent}🚫 Blocking: {', '.join(map(str, blocking_info['blocking']))}")
+                blocking_links = []
+                for task_id in blocking_info['blocking']:
+                    task_name = self._get_task_name(task_id)
+                    task_url = self.get_task_url(task_id)
+                    task_link = self.create_terminal_link(task_url, task_name)
+                    blocking_links.append(f"{task_id} ({task_link})")
+                print(f"{indent}🚫 Blocking: {', '.join(blocking_links)}")
             
             # Task details with IDs
             if task.get('user') and task['user'] != 'Unassigned':
@@ -1042,6 +1093,17 @@ class TaskManager(OdooBase):
         except (ValueError, TypeError):
             return f"☆☆☆ ({priority_value})"
 
+    def _get_task_name(self, task_id):
+        """Get task name by ID for blocking relationships"""
+        try:
+            task_records = self.tasks.search_records([('id', '=', task_id)])
+            if task_records:
+                return getattr(task_records[0], 'name', f'Task {task_id}')
+            else:
+                return f'Task {task_id}'
+        except Exception:
+            return f'Task {task_id}'
+
     def _get_blocking_info(self, task_id):
         """Get blocking and blocked-by relationships for a task"""
         blocking_info = {
@@ -1104,7 +1166,7 @@ class TaskManager(OdooBase):
             blocking_info['blocked_by'] = list(set(blocking_info['blocked_by']))
             
         except Exception as e:
-            if self.verbosity_level >= 2:
+            if self.verbosity_level >= 3:  # Only show on debug level
                 print(f"⚠️ Error getting blocking info for task {task_id}: {e}")
         
         return blocking_info
