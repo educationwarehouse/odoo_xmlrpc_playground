@@ -588,6 +588,9 @@ class TaskManager(OdooBase):
             dict: Result with project hierarchy data
         """
         try:
+            if not self.verbose:
+                print("🔍 Loading project hierarchy...", end="", flush=True)
+            
             # Get the project
             project_records = self.projects.search_records([('id', '=', project_id)])
             if not project_records:
@@ -600,12 +603,16 @@ class TaskManager(OdooBase):
             
             if self.verbose:
                 print(f"🔍 Searching for tasks in project {project_id} ('{project.name}')")
+            elif not self.verbose:
+                print(f"\r🔍 Loading tasks...", end="", flush=True)
             
             # Get all tasks in this project - use the working approach
             all_tasks = self.tasks.search_records([('project_id', '=', int(project_id))])
             
             if self.verbose:
                 print(f"🔍 Found {len(all_tasks)} tasks in project {project_id}")
+            elif not self.verbose:
+                print(f"\r🔍 Processing {len(all_tasks)} tasks...", end="", flush=True)
             
             # Separate main tasks (no parent) from subtasks
             main_tasks = []
@@ -621,6 +628,8 @@ class TaskManager(OdooBase):
             
             if self.verbose:
                 print(f"🔍 Found {len(main_tasks)} main tasks (without parents)")
+            elif not self.verbose:
+                print(f"\r🔍 Building hierarchy...", end="", flush=True)
             
             # Build hierarchy for each main task
             project_hierarchy = {
@@ -630,7 +639,10 @@ class TaskManager(OdooBase):
                 'main_task_count': len(main_tasks)
             }
             
-            for main_task in main_tasks:
+            for i, main_task in enumerate(main_tasks):
+                if not self.verbose:
+                    print(f"\r🔍 Processing task {i+1}/{len(main_tasks)}...", end="", flush=True)
+                
                 task_dict = self._task_to_dict(main_task)
                 
                 # Get children recursively
@@ -638,12 +650,17 @@ class TaskManager(OdooBase):
                 
                 project_hierarchy['main_tasks'].append(task_dict)
             
+            if not self.verbose:
+                print(f"\r" + " " * 50 + "\r", end="")  # Clear progress line
+            
             return {
                 'success': True,
                 'hierarchy': project_hierarchy
             }
             
         except Exception as e:
+            if not self.verbose:
+                print(f"\r" + " " * 50 + "\r", end="")  # Clear progress line
             return {
                 'success': False,
                 'error': str(e)
