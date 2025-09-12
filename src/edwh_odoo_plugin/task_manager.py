@@ -572,6 +572,152 @@ class TaskManager(OdooBase):
 
         return children
 
+    def show_project_hierarchy(self, project_id, max_depth=3):
+        """
+        Show complete project hierarchy with all tasks and their subtasks
+        
+        Args:
+            project_id: ID of the project to show hierarchy for
+            max_depth: Maximum depth to traverse for task subtasks
+            
+        Returns:
+            dict: Result with project hierarchy data
+        """
+        try:
+            # Get the project
+            project_records = self.projects.search_records([('id', '=', project_id)])
+            if not project_records:
+                return {
+                    'success': False,
+                    'error': f'Project with ID {project_id} not found'
+                }
+            
+            project = project_records[0]
+            
+            # Get all tasks in this project
+            all_tasks = self.tasks.search_records([('project_id', '=', project_id)])
+            
+            if self.verbose:
+                print(f"🔍 Found {len(all_tasks)} tasks in project {project_id}")
+            
+            # Separate main tasks (no parent) from subtasks
+            main_tasks = []
+            all_task_ids = set()
+            
+            for task in all_tasks:
+                all_task_ids.add(task.id)
+                # Check if task has no parent (is a main task)
+                if not hasattr(task, 'parent_id') or not task.parent_id:
+                    main_tasks.append(task)
+            
+            if self.verbose:
+                print(f"🔍 Found {len(main_tasks)} main tasks (without parents)")
+            
+            # Build hierarchy for each main task
+            project_hierarchy = {
+                'project': self._project_to_dict(project),
+                'main_tasks': [],
+                'total_tasks': len(all_tasks),
+                'main_task_count': len(main_tasks)
+            }
+            
+            for main_task in main_tasks:
+                task_dict = self._task_to_dict(main_task)
+                
+                # Get children recursively
+                task_dict['children'] = self._get_children_recursive(main_task.id, max_depth)
+                
+                project_hierarchy['main_tasks'].append(task_dict)
+            
+            return {
+                'success': True,
+                'hierarchy': project_hierarchy
+            }
+            
+        except Exception as e:
+            return {
+                'success': False,
+                'error': str(e)
+            }
+
+    def print_project_hierarchy(self, hierarchy):
+        """Print project hierarchy in a tree format"""
+        project = hierarchy['project']
+        
+        # Print project header
+        print(f"📂 PROJECT: {project['name']} (ID: {project['id']})")
+        if project.get('description'):
+            print(f"    📝 {project['description'][:100]}{'...' if len(project['description']) > 100 else ''}")
+        if project.get('partner_name'):
+            print(f"    🏢 Client: {project['partner_name']}")
+        if project.get('user_name'):
+            print(f"    👤 Manager: {project['user_name']}")
+        if project.get('stage_name'):
+            print(f"    📊 Stage: {project['stage_name']}")
+        
+        print(f"\n📊 SUMMARY:")
+        print(f"    📋 Total tasks: {hierarchy['total_tasks']}")
+        print(f"    🎯 Main tasks: {hierarchy['main_task_count']}")
+        print(f"    📉 Subtasks: {hierarchy['total_tasks'] - hierarchy['main_task_count']}")
+        
+        # Print main tasks and their hierarchies
+        if hierarchy['main_tasks']:
+            print(f"\n🌳 TASK HIERARCHY:")
+            for i, main_task in enumerate(hierarchy['main_tasks']):
+                is_last_main = i == len(hierarchy['main_tasks']) - 1
+                main_prefix = "└──" if is_last_main else "├──"
+                
+                print(f"{main_prefix} {main_task['name']} (ID: {main_task['id']})")
+                
+                # Print task details
+                if main_task.get('user'):
+                    indent = "   " if is_last_main else "│  "
+                    print(f"{indent} 👤 {main_task['user']}")
+                
+                # Print children
+                if main_task.get('children'):
+                    child_indent = "   " if is_last_main else "│  "
+                    self._print_children_recursive(main_task['children'], child_indent)
+        else:
+            print(f"\n📭 No tasks found in this project")
+
+    def _project_to_dict(self, project):
+        """Convert project record to dictionary"""
+        project_dict = {
+            'id': project.id,
+            'name': getattr(project, 'name', f'Project {project.id}'),
+        }
+        
+        # Add description
+        if hasattr(project, 'description') and project.description:
+            project_dict['description'] = project.description
+        
+        # Add partner info
+        if hasattr(project, 'partner_id') and project.partner_id:
+            try:
+                project_dict['partner_name'] = project.partner_id.name if hasattr(project.partner_id, 'name') else 'Unknown'
+                project_dict['partner_id'] = project.partner_id.id if hasattr(project.partner_id, 'id') else project.partner_id
+            except:
+                pass
+        
+        # Add user info
+        if hasattr(project, 'user_id') and project.user_id:
+            try:
+                project_dict['user_name'] = project.user_id.name if hasattr(project.user_id, 'name') else 'Unknown'
+                project_dict['user_id'] = project.user_id.id if hasattr(project.user_id, 'id') else project.user_id
+            except:
+                pass
+        
+        # Add stage info
+        if hasattr(project, 'stage_id') and project.stage_id:
+            try:
+                project_dict['stage_name'] = project.stage_id.name if hasattr(project.stage_id, 'name') else 'Unknown'
+                project_dict['stage_id'] = project.stage_id.id if hasattr(project.stage_id, 'id') else project.stage_id
+            except:
+                pass
+        
+        return project_dict
+
     def _task_to_dict(self, task):
         """Convert task record to dictionary"""
         task_dict = {
@@ -592,5 +738,17 @@ class TaskManager(OdooBase):
         if user_name != 'Unassigned':
             task_dict['user'] = user_name
             task_dict['user_id'] = user_id
+        
+        # Add stage info
+        if hasattr(task, 'stage_id') and task.stage_id:
+            try:
+                task_dict['stage_name'] = task.stage_id.name if hasattr(task.stage_id, 'name') else 'Unknown'
+                task_dict['stage_id'] = task.stage_id.id if hasattr(task.stage_id, 'id') else task.stage_id
+            except:
+                pass
+        
+        # Add priority
+        if hasattr(task, 'priority'):
+            task_dict['priority'] = getattr(task, 'priority', '0')
         
         return task_dict

@@ -680,3 +680,53 @@ def show_task_hierarchy(c: Context,
             'success': False,
             'error': str(e)
         }
+
+
+@task(
+    help={
+        'project_id': 'ID of the project to show hierarchy for',
+        'depth': 'Maximum depth to show for task subtasks (default: 3)',
+        'verbose': 'Show detailed information'
+    },
+    positional=['project_id'],
+    hookable=True
+)
+def show_project_hierarchy(c: Context,
+                          project_id: int,
+                          depth: int = 3,
+                          verbose: bool = False):
+    """
+    Show complete project hierarchy with all tasks and their subtasks
+    
+    Examples:
+        edwh odoo.show-project-hierarchy 123
+        edwh odoo.show-project-hierarchy 123 --depth 5
+        edwh odoo.show-project-hierarchy 123 --verbose
+    """
+    from .task_manager import TaskManager
+    
+    if verbose:
+        print("🌳 Project Hierarchy")
+        print("=" * 30)
+    
+    try:
+        manager = TaskManager(verbose=verbose)
+        result = manager.show_project_hierarchy(project_id, depth)
+        
+        if result['success']:
+            manager.print_project_hierarchy(result['hierarchy'])
+        else:
+            print(f"❌ Failed to get project hierarchy: {result['error']}")
+        
+        return result
+        
+    except Exception as e:
+        print(f"❌ Error: {e}")
+        if verbose:
+            import traceback
+            print(f"   Traceback: {traceback.format_exc()}")
+        
+        return {
+            'success': False,
+            'error': str(e)
+        }
