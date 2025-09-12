@@ -1788,28 +1788,42 @@ except Exception as e:
         }
         
         .tree-node.drag-over {
-            background-color: rgba(0, 123, 255, 0.15);
-            border: 2px dashed var(--accent-color);
-            border-radius: 6px;
-            box-shadow: 0 0 10px rgba(0, 123, 255, 0.3);
+            background-color: rgba(0, 123, 255, 0.2) !important;
+            border: 3px solid var(--accent-color) !important;
+            border-radius: 8px !important;
+            box-shadow: 0 0 15px rgba(0, 123, 255, 0.5) !important;
+            transform: scale(1.02) !important;
+            transition: all 0.2s ease !important;
         }
         
         .tree-node.dragging {
-            opacity: 0.6;
-            transform: rotate(1deg) scale(0.98);
+            opacity: 0.7;
+            transform: rotate(2deg) scale(0.95);
             z-index: 1000;
+            box-shadow: 0 8px 25px rgba(0, 0, 0, 0.3);
         }
         
         .tree-node.valid-drop-target {
-            background-color: rgba(40, 167, 69, 0.1);
-            border: 2px solid var(--success-color);
-            border-radius: 6px;
+            background-color: rgba(40, 167, 69, 0.15) !important;
+            border: 3px solid var(--success-color) !important;
+            border-radius: 8px !important;
+            box-shadow: 0 0 15px rgba(40, 167, 69, 0.4) !important;
+            transform: scale(1.02) !important;
         }
         
         .tree-node.invalid-drop-target {
-            background-color: rgba(220, 53, 69, 0.1);
-            border: 2px solid var(--danger-color);
+            background-color: rgba(220, 53, 69, 0.15) !important;
+            border: 3px solid var(--danger-color) !important;
+            border-radius: 8px !important;
+            box-shadow: 0 0 15px rgba(220, 53, 69, 0.4) !important;
+            cursor: not-allowed !important;
+        }
+        
+        .tree-node.potential-drop-zone {
+            background-color: rgba(0, 123, 255, 0.05);
+            border: 2px dashed rgba(0, 123, 255, 0.3);
             border-radius: 6px;
+            transition: all 0.2s ease;
         }
         
         .tree-node-content {
@@ -3859,6 +3873,9 @@ except Exception as e:
             
             draggedElement.classList.add('dragging');
             
+            // Highlight all potential drop zones
+            highlightPotentialDropZones();
+            
             // Set drag data
             e.dataTransfer.effectAllowed = 'move';
             e.dataTransfer.setData('text/plain', draggedTaskId);
@@ -3872,9 +3889,7 @@ except Exception as e:
             }
             
             // Clean up all drag classes
-            document.querySelectorAll('.tree-node').forEach(node => {
-                clearDropTargetClasses(node);
-            });
+            clearAllDropZoneHighlighting();
             
             // Clear timeouts
             if (dragEnterTimeout) {
@@ -3908,20 +3923,20 @@ except Exception as e:
                 dragLeaveTimeout = null;
             }
             
-            // Clear previous target
+            // Clear previous target highlighting
             if (currentDropTarget && currentDropTarget !== targetNode) {
-                clearDropTargetClasses(currentDropTarget);
+                clearActiveDropTargetClasses(currentDropTarget);
             }
             
             currentDropTarget = targetNode;
             
-            // Add appropriate visual feedback
+            // Add appropriate visual feedback with more stable highlighting
             if (isValidDropTarget(targetNode)) {
+                targetNode.classList.remove('potential-drop-zone', 'invalid-drop-target');
                 targetNode.classList.add('drag-over', 'valid-drop-target');
-                targetNode.classList.remove('invalid-drop-target');
             } else {
+                targetNode.classList.remove('potential-drop-zone', 'drag-over', 'valid-drop-target');
                 targetNode.classList.add('invalid-drop-target');
-                targetNode.classList.remove('drag-over', 'valid-drop-target');
             }
         }
         
@@ -3929,19 +3944,61 @@ except Exception as e:
             const targetNode = e.target.closest('.tree-node');
             if (!targetNode) return;
             
-            // Use timeout to prevent flickering when moving between child elements
-            dragLeaveTimeout = setTimeout(() => {
-                if (targetNode === currentDropTarget) {
-                    clearDropTargetClasses(targetNode);
-                    currentDropTarget = null;
-                }
-            }, 50);
+            // Only clear if we're actually leaving the node (not just moving to a child)
+            const rect = targetNode.getBoundingClientRect();
+            const x = e.clientX;
+            const y = e.clientY;
+            
+            // Check if we're still within the node bounds
+            const stillInside = (
+                x >= rect.left && 
+                x <= rect.right && 
+                y >= rect.top && 
+                y <= rect.bottom
+            );
+            
+            if (!stillInside) {
+                // Use a small timeout to prevent flickering
+                dragLeaveTimeout = setTimeout(() => {
+                    if (targetNode === currentDropTarget) {
+                        clearActiveDropTargetClasses(targetNode);
+                        // Restore potential drop zone highlighting
+                        if (isValidDropTarget(targetNode)) {
+                            targetNode.classList.add('potential-drop-zone');
+                        }
+                        currentDropTarget = null;
+                    }
+                }, 100);
+            }
         }
         
         function clearDropTargetClasses(node) {
             if (node) {
+                node.classList.remove('drag-over', 'valid-drop-target', 'invalid-drop-target', 'potential-drop-zone');
+            }
+        }
+        
+        function clearActiveDropTargetClasses(node) {
+            if (node) {
                 node.classList.remove('drag-over', 'valid-drop-target', 'invalid-drop-target');
             }
+        }
+        
+        function highlightPotentialDropZones() {
+            // Highlight all nodes that could potentially be drop targets
+            const allNodes = document.querySelectorAll('.tree-node');
+            allNodes.forEach(node => {
+                if (node !== draggedElement && isValidDropTarget(node)) {
+                    node.classList.add('potential-drop-zone');
+                }
+            });
+        }
+        
+        function clearAllDropZoneHighlighting() {
+            const allNodes = document.querySelectorAll('.tree-node');
+            allNodes.forEach(node => {
+                clearDropTargetClasses(node);
+            });
         }
         
         async function handleDrop(e) {
@@ -3983,7 +4040,7 @@ except Exception as e:
             }
             
             // Clean up
-            clearDropTargetClasses(targetNode);
+            clearAllDropZoneHighlighting();
         }
         
         function isValidDropTarget(targetNode) {
