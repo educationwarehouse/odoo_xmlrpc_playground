@@ -85,7 +85,7 @@ class WebSearchHandler(BaseHTTPRequestHandler):
         elif path.startswith('/api/hierarchy/task/'):
             task_id = self.extract_id_from_path(path, '/api/hierarchy/task/')
             self.handle_task_hierarchy_api(task_id)
-        elif path.startswith('/api/move-task/'):
+        elif path.startswith('/api/move-task'):
             self.handle_move_task_api(parsed_path.query)
         elif path.startswith('/static/'):
             self.serve_static_file(path)
