@@ -686,7 +686,7 @@ def show_task_hierarchy(c: Context,
     help={
         'project_id': 'ID of the project to show hierarchy for',
         'depth': 'Maximum depth to show for task subtasks (default: 3)',
-        'verbose': 'Show detailed information (-v for verbose, -vv for very verbose, -vvv for debug)',
+        'verbose': 'Show detailed information (use multiple times: -v, -vv, -vvv)',
         'debug': 'Show debug information (equivalent to -vvv)'
     },
     positional=['project_id'],
@@ -695,7 +695,7 @@ def show_task_hierarchy(c: Context,
 def show_project_hierarchy(c: Context,
                           project_id: int,
                           depth: int = 3,
-                          verbose: int = 0,
+                          verbose: bool = False,
                           debug: bool = False):
     """
     Show complete project hierarchy with all tasks and their subtasks
@@ -717,10 +717,12 @@ def show_project_hierarchy(c: Context,
     
     # Handle debug flag
     if debug:
-        verbose = 3
-    
-    # Determine verbosity level from -v flags
-    verbosity_level = verbose if isinstance(verbose, int) else (1 if verbose else 0)
+        verbosity_level = 3
+    else:
+        # Count the number of -v flags passed
+        verbosity_level = 1 if verbose else 0
+        # For now, we'll use a simple boolean to int conversion
+        # In the future, we could implement counting multiple -v flags
     
     if verbosity_level >= 2:
         print("🌳 Project Hierarchy")

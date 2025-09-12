@@ -892,96 +892,114 @@ class TaskManager(OdooBase):
     def _print_task_details(self, task, indent):
         """Print detailed task information with proper indentation based on verbosity level"""
         
-        # Level 0 (default): Only show essential non-default info
+        # Get blocking info first since it's important at all levels
+        blocking_info = self._get_blocking_info(task['id'])
+        
+        # Level 0 (default): Essential info with icons, blocking relationships prominent
         if self.verbosity_level == 0:
-            # Only show if assigned
+            # Blocking relationships - ALWAYS show these as they're critical
+            if blocking_info['blocking'] or blocking_info['blocked_by']:
+                if blocking_info['blocking']:
+                    print(f"{indent}🚫 {', '.join(map(str, blocking_info['blocking']))}")
+                if blocking_info['blocked_by']:
+                    print(f"{indent}⛔ {', '.join(map(str, blocking_info['blocked_by']))}")
+            
+            # Essential info with icons only (no labels)
             if task.get('user') and task['user'] != 'Unassigned':
                 print(f"{indent}👤 {task['user']}")
             
-            # Only show if not default stage
             if task.get('stage_name') and task['stage_name'] not in ['Unknown', 'No stage']:
                 print(f"{indent}📊 {task['stage_name']}")
             
-            # Only show if priority is set
             priority_value = task.get('priority', '0')
             if priority_value and priority_value != '0':
                 priority_stars = self._convert_priority_to_stars(priority_value)
-                print(f"{indent}🔥 {priority_stars}")
+                print(f"{indent}{priority_stars}")  # Just stars, no 🔥 label
             
-            # Only show state if not draft/normal
+            # State with icon only
             state_value = task.get('state', 'draft')
             if state_value and state_value not in ['draft', 'normal']:
                 if state_value.startswith('01_'):
+                    state_display = state_value[3:].replace('_', ' ').title()
+                elif state_value.startswith('04_'):
                     state_display = state_value[3:].replace('_', ' ').title()
                 else:
                     state_display = state_value.replace('_', ' ').title()
                 print(f"{indent}🏷️ {state_display}")
         
-        # Level 1 (-v): Show more task details
+        # Level 1 (-v): Show more task details with labels
         elif self.verbosity_level == 1:
-            # Always show assigned user
+            # Blocking relationships - show first as they're critical
+            if blocking_info['blocking'] or blocking_info['blocked_by']:
+                if blocking_info['blocking']:
+                    print(f"{indent}🚫 Blocking: {', '.join(map(str, blocking_info['blocking']))}")
+                if blocking_info['blocked_by']:
+                    print(f"{indent}⛔ Blocked by: {', '.join(map(str, blocking_info['blocked_by']))}")
+            
+            # Task details with labels
             if task.get('user') and task['user'] != 'Unassigned':
                 print(f"{indent}👤 {task['user']}")
             
-            # Always show stage if available
             if task.get('stage_name') and task['stage_name'] not in ['Unknown', 'No stage']:
                 print(f"{indent}📊 {task['stage_name']}")
             
-            # Always show priority if set
             priority_value = task.get('priority', '0')
             if priority_value and priority_value != '0':
                 priority_stars = self._convert_priority_to_stars(priority_value)
                 print(f"{indent}🔥 {priority_stars}")
             
-            # Show deadline if available
             if task.get('deadline'):
                 print(f"{indent}📅 Deadline: {task['deadline']}")
             
-            # Show state
             state_value = task.get('state', 'draft')
             if state_value and state_value not in ['draft']:
                 if state_value.startswith('01_'):
+                    state_display = state_value[3:].replace('_', ' ').title()
+                elif state_value.startswith('04_'):
                     state_display = state_value[3:].replace('_', ' ').title()
                 else:
                     state_display = state_value.replace('_', ' ').title()
                 print(f"{indent}🏷️ State: {state_display}")
             
-            # Show modified date
             if task.get('write_date'):
                 print(f"{indent}📅 Modified: {task['write_date']}")
         
         # Level 2 (-vv): Add IDs and more details
         elif self.verbosity_level == 2:
-            # Show user with ID
+            # Blocking relationships first
+            if blocking_info['blocking'] or blocking_info['blocked_by']:
+                if blocking_info['blocking']:
+                    print(f"{indent}🚫 Blocking: {', '.join(map(str, blocking_info['blocking']))}")
+                if blocking_info['blocked_by']:
+                    print(f"{indent}⛔ Blocked by: {', '.join(map(str, blocking_info['blocked_by']))}")
+            
+            # Task details with IDs
             if task.get('user') and task['user'] != 'Unassigned':
                 user_id_info = f" (ID: {task['user_id']})" if task.get('user_id') else ""
                 print(f"{indent}👤 {task['user']}{user_id_info}")
             
-            # Show stage with ID
             if task.get('stage_name') and task['stage_name'] not in ['Unknown', 'No stage']:
                 stage_id_info = f" (ID: {task['stage_id']})" if task.get('stage_id') else ""
                 print(f"{indent}📊 {task['stage_name']}{stage_id_info}")
             
-            # Show priority with raw value
             priority_value = task.get('priority', '0')
             if priority_value and priority_value != '0':
                 priority_stars = self._convert_priority_to_stars(priority_value)
                 print(f"{indent}🔥 {priority_stars} - Priority: {priority_value}")
             
-            # Show deadline
             if task.get('deadline'):
                 print(f"{indent}📅 Deadline: {task['deadline']}")
             
-            # Show state with raw value
             state_value = task.get('state', 'draft')
             if state_value:
                 if state_value.startswith('01_'):
+                    state_display = state_value[3:].replace('_', ' ').title()
+                elif state_value.startswith('04_'):
                     state_display = state_value[3:].replace('_', ' ').title()
                 else:
                     state_display = state_value.replace('_', ' ').title()
                 print(f"{indent}🏷️ State: {state_display} ({state_value})")
             
-            # Show dates
             if task.get('write_date'):
                 print(f"{indent}📅 Modified: {task['write_date']}")
             if task.get('create_date'):
@@ -995,14 +1013,7 @@ class TaskManager(OdooBase):
                 if key not in ['id', 'name', 'children']:
                     print(f"{indent}   {key}: {value}")
         
-        # Blocking relationships (level 1+)
-        if self.verbosity_level >= 1:
-            blocking_info = self._get_blocking_info(task['id'])
-            if blocking_info['blocking'] or blocking_info['blocked_by']:
-                if blocking_info['blocking']:
-                    print(f"{indent}🚫 Blocking: {', '.join(map(str, blocking_info['blocking']))}")
-                if blocking_info['blocked_by']:
-                    print(f"{indent}⛔ Blocked by: {', '.join(map(str, blocking_info['blocked_by']))}")
+        # Note: Blocking relationships are now handled within each verbosity level above
 
     def _convert_priority_to_stars(self, priority_value):
         """Convert Odoo priority to 3-star system"""
