@@ -79,6 +79,12 @@ class WebSearchHandler(BaseHTTPRequestHandler):
             self.handle_download_api(parsed_path.query)
         elif path == '/api/settings':
             self.handle_settings_get()
+        elif path.startswith('/api/hierarchy/project/'):
+            project_id = self.extract_id_from_path(path, '/api/hierarchy/project/')
+            self.handle_project_hierarchy_api(project_id)
+        elif path.startswith('/api/hierarchy/task/'):
+            task_id = self.extract_id_from_path(path, '/api/hierarchy/task/')
+            self.handle_task_hierarchy_api(task_id)
         elif path.startswith('/static/'):
             self.serve_static_file(path)
         else:
@@ -662,6 +668,206 @@ except Exception as e:
         except Exception as e:
             self.send_json_response({'error': str(e)}, 500)
     
+    def extract_id_from_path(self, path, prefix):
+        """Extract ID from URL path"""
+        try:
+            return int(path[len(prefix):].split('/')[0])
+        except (ValueError, IndexError):
+            return None
+
+    def handle_project_hierarchy_api(self, project_id):
+        """Handle project hierarchy API requests"""
+        try:
+            if not project_id:
+                self.send_json_response({'error': 'Invalid project ID'}, 400)
+                return
+
+            print(f"🌳 Hierarchy request for project {project_id}")
+
+            # Import TaskManager
+            try:
+                from .task_manager import TaskManager
+            except ImportError:
+                try:
+                    from edwh_odoo_plugin.task_manager import TaskManager
+                except ImportError:
+                    from task_manager import TaskManager
+
+            # Get hierarchy
+            manager = TaskManager(verbose=False)
+            result = manager.show_project_hierarchy(int(project_id))
+            
+            if result['success']:
+                # Convert hierarchy to web-friendly format
+                web_hierarchy = self.convert_hierarchy_for_web(result['hierarchy'], 'project')
+                self.send_json_response({
+                    'success': True,
+                    'hierarchy': web_hierarchy,
+                    'type': 'project'
+                })
+            else:
+                self.send_json_response({
+                    'success': False,
+                    'error': result['error']
+                }, 400)
+                
+        except Exception as e:
+            import traceback
+            error_msg = f"Hierarchy error: {str(e)}"
+            traceback_msg = traceback.format_exc()
+
+            print(f"❌ {error_msg}")
+            print(f"   Traceback: {traceback_msg}")
+
+            self.send_json_response({
+                'error': error_msg,
+                'traceback': traceback_msg
+            }, 500)
+
+    def handle_task_hierarchy_api(self, task_id):
+        """Handle task hierarchy API requests"""
+        try:
+            if not task_id:
+                self.send_json_response({'error': 'Invalid task ID'}, 400)
+                return
+
+            print(f"🌳 Hierarchy request for task {task_id}")
+
+            # Import TaskManager
+            try:
+                from .task_manager import TaskManager
+            except ImportError:
+                try:
+                    from edwh_odoo_plugin.task_manager import TaskManager
+                except ImportError:
+                    from task_manager import TaskManager
+
+            # Get hierarchy
+            manager = TaskManager(verbose=False)
+            result = manager.show_hierarchy(int(task_id))
+            
+            if result['success']:
+                # Convert hierarchy to web-friendly format
+                web_hierarchy = self.convert_hierarchy_for_web(result['hierarchy'], 'task')
+                self.send_json_response({
+                    'success': True,
+                    'hierarchy': web_hierarchy,
+                    'type': 'task'
+                })
+            else:
+                self.send_json_response({
+                    'success': False,
+                    'error': result['error']
+                }, 400)
+                
+        except Exception as e:
+            import traceback
+            error_msg = f"Hierarchy error: {str(e)}"
+            traceback_msg = traceback.format_exc()
+
+            print(f"❌ {error_msg}")
+            print(f"   Traceback: {traceback_msg}")
+
+            self.send_json_response({
+                'error': error_msg,
+                'traceback': traceback_msg
+            }, 500)
+
+    def convert_hierarchy_for_web(self, hierarchy, hierarchy_type):
+        """Convert terminal-friendly hierarchy to web-friendly format"""
+        def clean_text(text):
+            """Remove terminal escape codes and clean text"""
+            if not text:
+                return ""
+            # Remove ANSI escape sequences
+            import re
+            ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
+            return ansi_escape.sub('', str(text))
+
+        def convert_task_node(task_data):
+            """Convert a task node to web format"""
+            if not task_data:
+                return None
+                
+            node = {
+                'id': task_data.get('id'),
+                'name': clean_text(task_data.get('name', 'Untitled')),
+                'type': 'task',
+                'url': f"https://education-warehouse.odoo.com/web#id={task_data.get('id')}&model=project.task&view_type=form",
+                'metadata': {}
+            }
+            
+            # Add metadata
+            if task_data.get('user'):
+                node['metadata']['user'] = clean_text(task_data['user'])
+            if task_data.get('stage_name'):
+                node['metadata']['stage'] = clean_text(task_data['stage_name'])
+            if task_data.get('priority'):
+                node['metadata']['priority'] = clean_text(task_data['priority'])
+            if task_data.get('state'):
+                node['metadata']['state'] = clean_text(task_data['state'])
+            if task_data.get('deadline'):
+                node['metadata']['deadline'] = clean_text(task_data['deadline'])
+            if task_data.get('project_name'):
+                node['metadata']['project'] = clean_text(task_data['project_name'])
+            if task_data.get('description'):
+                node['metadata']['description'] = clean_text(task_data['description'])[:200] + ('...' if len(clean_text(task_data['description'])) > 200 else '')
+            
+            # Convert children recursively
+            if task_data.get('children'):
+                node['children'] = []
+                for child in task_data['children']:
+                    child_node = convert_task_node(child)
+                    if child_node:
+                        node['children'].append(child_node)
+            
+            return node
+
+        web_data = {}
+        
+        if hierarchy_type == 'project':
+            # Project hierarchy
+            project = hierarchy.get('project', {})
+            web_data = {
+                'type': 'project',
+                'root': {
+                    'id': project.get('id'),
+                    'name': clean_text(project.get('name', 'Untitled Project')),
+                    'type': 'project',
+                    'url': f"https://education-warehouse.odoo.com/web#id={project.get('id')}&model=project.project&view_type=form",
+                    'metadata': {
+                        'manager': clean_text(project.get('user_name', 'Unassigned')),
+                        'client': clean_text(project.get('partner_name', 'No client')),
+                        'total_tasks': hierarchy.get('total_tasks', 0),
+                        'main_tasks': hierarchy.get('main_task_count', 0)
+                    },
+                    'children': []
+                }
+            }
+            
+            # Add main tasks as children
+            for main_task in hierarchy.get('main_tasks', []):
+                task_node = convert_task_node(main_task)
+                if task_node:
+                    web_data['root']['children'].append(task_node)
+                    
+        elif hierarchy_type == 'task':
+            # Task hierarchy
+            main_task = hierarchy.get('main_task', {})
+            web_data = {
+                'type': 'task',
+                'root': convert_task_node(main_task),
+                'parents': []
+            }
+            
+            # Add parent chain
+            for parent in hierarchy.get('parents', []):
+                parent_node = convert_task_node(parent)
+                if parent_node:
+                    web_data['parents'].append(parent_node)
+        
+        return web_data
+
     def handle_settings_post(self):
         """Handle POST request for settings"""
         try:
@@ -1247,11 +1453,161 @@ except Exception as e:
             display: block;
         }
         
-        .pins-content, .settings-content {
+        .pins-content, .settings-content, .hierarchy-content {
             background: var(--card-bg);
             padding: 25px;
             border-radius: 12px;
             box-shadow: var(--shadow);
+        }
+        
+        .hierarchy-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            padding-bottom: 15px;
+            border-bottom: 1px solid var(--border-color);
+        }
+        
+        .hierarchy-actions {
+            display: flex;
+            gap: 10px;
+        }
+        
+        .hierarchy-search {
+            margin-bottom: 20px;
+            padding: 20px;
+            background: var(--bg-color);
+            border-radius: 8px;
+            border: 1px solid var(--border-color);
+        }
+        
+        .hierarchy-container {
+            max-height: 70vh;
+            overflow-y: auto;
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            background: var(--bg-color);
+        }
+        
+        .hierarchy-placeholder {
+            text-align: center;
+            padding: 40px 20px;
+            color: #666;
+        }
+        
+        [data-theme="dark"] .hierarchy-placeholder {
+            color: #aaa;
+        }
+        
+        .tree-view {
+            padding: 20px;
+            font-family: 'Courier New', monospace;
+            line-height: 1.6;
+        }
+        
+        .tree-node {
+            margin: 2px 0;
+            position: relative;
+        }
+        
+        .tree-node-content {
+            display: flex;
+            align-items: center;
+            padding: 4px 8px;
+            border-radius: 4px;
+            transition: background-color 0.2s;
+            cursor: pointer;
+        }
+        
+        .tree-node-content:hover {
+            background-color: var(--card-bg);
+        }
+        
+        .tree-toggle {
+            width: 16px;
+            height: 16px;
+            margin-right: 8px;
+            border: none;
+            background: none;
+            cursor: pointer;
+            font-size: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        .tree-toggle:hover {
+            background-color: var(--border-color);
+            border-radius: 2px;
+        }
+        
+        .tree-icon {
+            margin-right: 8px;
+            font-size: 14px;
+        }
+        
+        .tree-label {
+            flex: 1;
+            font-weight: 500;
+        }
+        
+        .tree-label a {
+            color: var(--accent-color);
+            text-decoration: none;
+        }
+        
+        .tree-label a:hover {
+            text-decoration: underline;
+        }
+        
+        .tree-metadata {
+            font-size: 12px;
+            color: #666;
+            margin-left: 8px;
+            display: flex;
+            gap: 12px;
+            align-items: center;
+        }
+        
+        [data-theme="dark"] .tree-metadata {
+            color: #aaa;
+        }
+        
+        .tree-children {
+            margin-left: 24px;
+            border-left: 1px solid var(--border-color);
+            padding-left: 12px;
+        }
+        
+        .tree-children.collapsed {
+            display: none;
+        }
+        
+        .hierarchy-breadcrumb {
+            padding: 10px 20px;
+            background: var(--card-bg);
+            border-bottom: 1px solid var(--border-color);
+            font-size: 14px;
+        }
+        
+        .breadcrumb-item {
+            display: inline;
+        }
+        
+        .breadcrumb-item:not(:last-child)::after {
+            content: ' › ';
+            color: #666;
+            margin: 0 8px;
+        }
+        
+        .breadcrumb-item a {
+            color: var(--accent-color);
+            text-decoration: none;
+        }
+        
+        .breadcrumb-item a:hover {
+            text-decoration: underline;
         }
         
         .pins-header {
@@ -1434,6 +1790,7 @@ except Exception as e:
         <div class="tab-container">
             <div class="tab-buttons">
                 <button class="tab-button active" onclick="switchTab('search')">🔍 Search</button>
+                <button class="tab-button" onclick="switchTab('hierarchy')">🌳 Hierarchy</button>
                 <button class="tab-button" onclick="switchTab('pins')">📌 Pins</button>
                 <button class="tab-button" onclick="switchTab('settings')">⚙️ Settings</button>
             </div>
@@ -1509,6 +1866,44 @@ except Exception as e:
             <div id="results" class="results"></div>
         </div>
         
+        <div id="hierarchy-tab" class="tab-content">
+            <div class="hierarchy-content">
+                <div class="hierarchy-header">
+                    <h2>🌳 Project & Task Hierarchy</h2>
+                    <div class="hierarchy-actions">
+                        <button type="button" class="btn btn-secondary" onclick="expandAllNodes()">📂 Expand All</button>
+                        <button type="button" class="btn btn-secondary" onclick="collapseAllNodes()">📁 Collapse All</button>
+                    </div>
+                </div>
+                
+                <div class="hierarchy-search">
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="hierarchySearch">Search Project or Task</label>
+                            <input type="text" id="hierarchySearch" placeholder="Enter project name, task name, or ID...">
+                        </div>
+                        <div class="form-group small">
+                            <label for="hierarchyType">Type</label>
+                            <select id="hierarchyType">
+                                <option value="project">Project</option>
+                                <option value="task">Task</option>
+                            </select>
+                        </div>
+                        <div class="form-group small">
+                            <button type="button" class="btn btn-primary" onclick="searchHierarchy()">🔍 Load</button>
+                        </div>
+                    </div>
+                </div>
+                
+                <div id="hierarchyContainer" class="hierarchy-container">
+                    <div class="hierarchy-placeholder">
+                        <p>🌳 Search for a project or task above to view its hierarchy</p>
+                        <p>Or click "View Hierarchy" from search results</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
         <div id="pins-tab" class="tab-content">
             <div class="pins-content">
                 <div class="pins-header">
@@ -1732,6 +2127,8 @@ except Exception as e:
                 loadPins();
             } else if (tabName === 'settings') {
                 loadSettings();
+            } else if (tabName === 'hierarchy') {
+                // Hierarchy tab doesn't need initial loading
             }
         }
         
@@ -2042,6 +2439,13 @@ except Exception as e:
                 html += `<a href="${item.download_url}" class="download-btn">📥 Download</a>`;
             }
             
+            // Hierarchy button for projects and tasks
+            if (type === 'project') {
+                html += `<button class="btn btn-secondary" onclick="viewHierarchy('project', '${item.id}')" title="View Project Hierarchy">🌳 Hierarchy</button>`;
+            } else if (type === 'task') {
+                html += `<button class="btn btn-secondary" onclick="viewHierarchy('task', '${item.id}')" title="View Task Hierarchy">🌳 Hierarchy</button>`;
+            }
+            
             // Pin button
             const isPinned = isItemPinned(item.id, type);
             const pinText = isPinned ? '📌 Unpin' : '📌 Pin';
@@ -2338,6 +2742,265 @@ except Exception as e:
                 loadSearchHistory();
                 alert('Cache and search history cleared successfully!');
             }
+        }
+        
+        // Hierarchy functionality
+        function viewHierarchy(type, id) {
+            // Switch to hierarchy tab
+            switchTab('hierarchy');
+            
+            // Set the search form
+            document.getElementById('hierarchySearch').value = id;
+            document.getElementById('hierarchyType').value = type;
+            
+            // Load the hierarchy
+            loadHierarchy(type, id);
+        }
+        
+        function searchHierarchy() {
+            const searchValue = document.getElementById('hierarchySearch').value.trim();
+            const type = document.getElementById('hierarchyType').value;
+            
+            if (!searchValue) {
+                alert('Please enter a project name, task name, or ID');
+                return;
+            }
+            
+            // If it's a number, treat as ID
+            if (/^\d+$/.test(searchValue)) {
+                loadHierarchy(type, searchValue);
+            } else {
+                // Search for the item first
+                searchForHierarchyItem(searchValue, type);
+            }
+        }
+        
+        function searchForHierarchyItem(searchTerm, type) {
+            const container = document.getElementById('hierarchyContainer');
+            container.innerHTML = '<div class="loading">Searching for ' + type + '...</div>';
+            
+            // Use existing search API
+            const params = new URLSearchParams({
+                q: searchTerm,
+                type: type === 'project' ? 'projects' : 'tasks',
+                limit: '10'
+            });
+            
+            fetch('/api/search?' + params.toString())
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success && data.search_id) {
+                        pollSearchForHierarchy(data.search_id, type);
+                    } else {
+                        container.innerHTML = '<div class="error">Search failed: ' + (data.error || 'Unknown error') + '</div>';
+                    }
+                })
+                .catch(error => {
+                    container.innerHTML = '<div class="error">Search error: ' + error.message + '</div>';
+                });
+        }
+        
+        function pollSearchForHierarchy(searchId, type) {
+            function checkStatus() {
+                fetch(`/api/search/status?id=${searchId}`)
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.status === 'running') {
+                            setTimeout(checkStatus, 1000);
+                        } else if (data.status === 'completed' && data.results && data.results.success) {
+                            const results = data.results.results;
+                            const items = type === 'project' ? results.projects : results.tasks;
+                            
+                            if (items && items.length > 0) {
+                                showHierarchySearchResults(items, type);
+                            } else {
+                                document.getElementById('hierarchyContainer').innerHTML = 
+                                    '<div class="error">No ' + type + 's found</div>';
+                            }
+                        } else {
+                            document.getElementById('hierarchyContainer').innerHTML = 
+                                '<div class="error">Search failed</div>';
+                        }
+                    })
+                    .catch(error => {
+                        document.getElementById('hierarchyContainer').innerHTML = 
+                            '<div class="error">Search error: ' + error.message + '</div>';
+                    });
+            }
+            checkStatus();
+        }
+        
+        function showHierarchySearchResults(items, type) {
+            const container = document.getElementById('hierarchyContainer');
+            let html = '<div style="padding: 20px;"><h3>Select ' + type + ' to view hierarchy:</h3>';
+            
+            items.forEach(item => {
+                html += `
+                    <div class="result-item" style="margin: 10px 0; cursor: pointer;" onclick="loadHierarchy('${type}', '${item.id}')">
+                        <div class="result-title">
+                            ${escapeHtml(item.name)} <small>(ID: ${item.id})</small>
+                        </div>
+                `;
+                
+                if (type === 'project' && item.partner) {
+                    html += `<div class="result-meta"><div class="meta-item">🏢 ${escapeHtml(item.partner)}</div></div>`;
+                } else if (type === 'task' && item.project_name) {
+                    html += `<div class="result-meta"><div class="meta-item">📂 ${escapeHtml(item.project_name)}</div></div>`;
+                }
+                
+                html += '</div>';
+            });
+            
+            html += '</div>';
+            container.innerHTML = html;
+        }
+        
+        function loadHierarchy(type, id) {
+            const container = document.getElementById('hierarchyContainer');
+            container.innerHTML = '<div class="loading">Loading ' + type + ' hierarchy...</div>';
+            
+            fetch(`/api/hierarchy/${type}/${id}`)
+                .then(response => response.json())
+                .then(data => {
+                    if (data.success) {
+                        displayHierarchy(data.hierarchy);
+                    } else {
+                        container.innerHTML = '<div class="error">Error: ' + (data.error || 'Failed to load hierarchy') + '</div>';
+                    }
+                })
+                .catch(error => {
+                    container.innerHTML = '<div class="error">Error: ' + error.message + '</div>';
+                });
+        }
+        
+        function displayHierarchy(hierarchy) {
+            const container = document.getElementById('hierarchyContainer');
+            let html = '';
+            
+            // Add breadcrumb for task hierarchy
+            if (hierarchy.type === 'task' && hierarchy.parents && hierarchy.parents.length > 0) {
+                html += '<div class="hierarchy-breadcrumb">';
+                html += '<span>Path: </span>';
+                hierarchy.parents.forEach((parent, index) => {
+                    html += `<span class="breadcrumb-item"><a href="${parent.url}" target="_blank">${escapeHtml(parent.name)}</a></span>`;
+                });
+                html += `<span class="breadcrumb-item">${escapeHtml(hierarchy.root.name)}</span>`;
+                html += '</div>';
+            }
+            
+            // Render tree
+            html += '<div class="tree-view">';
+            html += renderTreeNode(hierarchy.root, 0, true);
+            html += '</div>';
+            
+            container.innerHTML = html;
+        }
+        
+        function renderTreeNode(node, depth, isRoot = false) {
+            if (!node) return '';
+            
+            const hasChildren = node.children && node.children.length > 0;
+            const nodeId = `node-${node.type}-${node.id}`;
+            
+            let html = '<div class="tree-node" data-node-id="' + nodeId + '">';
+            html += '<div class="tree-node-content">';
+            
+            // Toggle button
+            if (hasChildren) {
+                html += '<button class="tree-toggle" onclick="toggleTreeNode(\'' + nodeId + '\')" title="Expand/Collapse">▼</button>';
+            } else {
+                html += '<span class="tree-toggle"></span>';
+            }
+            
+            // Icon
+            const icon = node.type === 'project' ? '📂' : '📋';
+            html += '<span class="tree-icon">' + icon + '</span>';
+            
+            // Label with link
+            html += '<span class="tree-label">';
+            html += '<a href="' + node.url + '" target="_blank">' + escapeHtml(node.name) + '</a>';
+            html += ' <small>(ID: ' + node.id + ')</small>';
+            html += '</span>';
+            
+            // Metadata
+            if (node.metadata && Object.keys(node.metadata).length > 0) {
+                html += '<div class="tree-metadata">';
+                
+                if (node.metadata.user) {
+                    html += '<span>👤 ' + escapeHtml(node.metadata.user) + '</span>';
+                }
+                if (node.metadata.stage) {
+                    html += '<span>📊 ' + escapeHtml(node.metadata.stage) + '</span>';
+                }
+                if (node.metadata.priority && node.metadata.priority !== '0') {
+                    html += '<span>🔥 ' + escapeHtml(node.metadata.priority) + '</span>';
+                }
+                if (node.metadata.manager) {
+                    html += '<span>👤 ' + escapeHtml(node.metadata.manager) + '</span>';
+                }
+                if (node.metadata.total_tasks) {
+                    html += '<span>📊 ' + node.metadata.total_tasks + ' tasks</span>';
+                }
+                
+                html += '</div>';
+            }
+            
+            html += '</div>';
+            
+            // Children
+            if (hasChildren) {
+                html += '<div class="tree-children" id="children-' + nodeId + '">';
+                node.children.forEach(child => {
+                    html += renderTreeNode(child, depth + 1);
+                });
+                html += '</div>';
+            }
+            
+            html += '</div>';
+            return html;
+        }
+        
+        function toggleTreeNode(nodeId) {
+            const childrenContainer = document.getElementById('children-' + nodeId);
+            const toggleButton = document.querySelector('[data-node-id="' + nodeId + '"] .tree-toggle');
+            
+            if (childrenContainer) {
+                if (childrenContainer.classList.contains('collapsed')) {
+                    childrenContainer.classList.remove('collapsed');
+                    toggleButton.textContent = '▼';
+                } else {
+                    childrenContainer.classList.add('collapsed');
+                    toggleButton.textContent = '▶';
+                }
+            }
+        }
+        
+        function expandAllNodes() {
+            const collapsedNodes = document.querySelectorAll('.tree-children.collapsed');
+            collapsedNodes.forEach(node => {
+                node.classList.remove('collapsed');
+            });
+            
+            const toggleButtons = document.querySelectorAll('.tree-toggle');
+            toggleButtons.forEach(button => {
+                if (button.textContent === '▶') {
+                    button.textContent = '▼';
+                }
+            });
+        }
+        
+        function collapseAllNodes() {
+            const expandedNodes = document.querySelectorAll('.tree-children:not(.collapsed)');
+            expandedNodes.forEach(node => {
+                node.classList.add('collapsed');
+            });
+            
+            const toggleButtons = document.querySelectorAll('.tree-toggle');
+            toggleButtons.forEach(button => {
+                if (button.textContent === '▼') {
+                    button.textContent = '▶';
+                }
+            });
         }
         
         // Initialize
