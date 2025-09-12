@@ -897,12 +897,11 @@ class TaskManager(OdooBase):
         
         # Level 0 (default): Essential info with icons, blocking relationships prominent
         if self.verbosity_level == 0:
-            # Blocking relationships - ALWAYS show these as they're critical
-            if blocking_info['blocking'] or blocking_info['blocked_by']:
-                if blocking_info['blocking']:
-                    print(f"{indent}🚫 {', '.join(map(str, blocking_info['blocking']))}")
-                if blocking_info['blocked_by']:
-                    print(f"{indent}⛔ {', '.join(map(str, blocking_info['blocked_by']))}")
+            # Blocking relationships - ALWAYS show these FIRST as they're critical
+            if blocking_info['blocked_by']:
+                print(f"{indent}⛔ {', '.join(map(str, blocking_info['blocked_by']))}")
+            if blocking_info['blocking']:
+                print(f"{indent}🚫 {', '.join(map(str, blocking_info['blocking']))}")
             
             # Essential info with icons only (no labels)
             if task.get('user') and task['user'] != 'Unassigned':
@@ -914,7 +913,7 @@ class TaskManager(OdooBase):
             priority_value = task.get('priority', '0')
             if priority_value and priority_value != '0':
                 priority_stars = self._convert_priority_to_stars(priority_value)
-                print(f"{indent}{priority_stars}")  # Just stars, no 🔥 label
+                print(f"{indent}{priority_stars}")  # Just stars, no label
             
             # State with icon only
             state_value = task.get('state', 'draft')
@@ -926,15 +925,18 @@ class TaskManager(OdooBase):
                 else:
                     state_display = state_value.replace('_', ' ').title()
                 print(f"{indent}🏷️ {state_display}")
+            
+            # Deadline with icon only
+            if task.get('deadline'):
+                print(f"{indent}📅 {task['deadline']}")
         
         # Level 1 (-v): Show more task details with labels
         elif self.verbosity_level == 1:
             # Blocking relationships - show first as they're critical
-            if blocking_info['blocking'] or blocking_info['blocked_by']:
-                if blocking_info['blocking']:
-                    print(f"{indent}🚫 Blocking: {', '.join(map(str, blocking_info['blocking']))}")
-                if blocking_info['blocked_by']:
-                    print(f"{indent}⛔ Blocked by: {', '.join(map(str, blocking_info['blocked_by']))}")
+            if blocking_info['blocked_by']:
+                print(f"{indent}⛔ Blocked by: {', '.join(map(str, blocking_info['blocked_by']))}")
+            if blocking_info['blocking']:
+                print(f"{indent}🚫 Blocking: {', '.join(map(str, blocking_info['blocking']))}")
             
             # Task details with labels
             if task.get('user') and task['user'] != 'Unassigned':
@@ -967,11 +969,10 @@ class TaskManager(OdooBase):
         # Level 2 (-vv): Add IDs and more details
         elif self.verbosity_level == 2:
             # Blocking relationships first
-            if blocking_info['blocking'] or blocking_info['blocked_by']:
-                if blocking_info['blocking']:
-                    print(f"{indent}🚫 Blocking: {', '.join(map(str, blocking_info['blocking']))}")
-                if blocking_info['blocked_by']:
-                    print(f"{indent}⛔ Blocked by: {', '.join(map(str, blocking_info['blocked_by']))}")
+            if blocking_info['blocked_by']:
+                print(f"{indent}⛔ Blocked by: {', '.join(map(str, blocking_info['blocked_by']))}")
+            if blocking_info['blocking']:
+                print(f"{indent}🚫 Blocking: {', '.join(map(str, blocking_info['blocking']))}")
             
             # Task details with IDs
             if task.get('user') and task['user'] != 'Unassigned':
