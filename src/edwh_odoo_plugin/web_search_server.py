@@ -3486,7 +3486,11 @@ except Exception as e:
             const stage = node.stage || 'No Stage';
             const priorityLevel = node.priority ? node.priority.level : 0;
             
-            let html = `<div class="tree-node" data-node-id="${nodeId}" data-task-id="${node.id}" data-stage="${stage}" data-priority="${priorityLevel}" data-type="${node.type}">`;
+            // Ensure we have a valid ID
+            const taskId = node.id || 'unknown';
+            console.log('Rendering tree node:', { nodeId, taskId, name: node.name, type: node.type });
+            
+            let html = `<div class="tree-node" data-node-id="${nodeId}" data-task-id="${taskId}" data-stage="${stage}" data-priority="${priorityLevel}" data-type="${node.type}">`;
             
             // Drop indicator (for drag & drop)
             html += '<div class="drop-indicator"></div>';
@@ -3827,13 +3831,39 @@ except Exception as e:
             draggedElement = e.target.closest('.tree-node');
             draggedTaskId = draggedElement.dataset.taskId;
             
+            // Debug logging
+            console.log('Drag started - element:', draggedElement);
+            console.log('Drag started - taskId from dataset:', draggedTaskId);
+            console.log('Drag started - all datasets:', draggedElement.dataset);
+            
+            // Fallback: try to extract from node ID if dataset.taskId is null
+            if (!draggedTaskId || draggedTaskId === 'null' || draggedTaskId === 'undefined') {
+                const nodeId = draggedElement.dataset.nodeId;
+                console.log('TaskId was null, trying nodeId:', nodeId);
+                if (nodeId) {
+                    // Extract ID from node-task-123 format
+                    const match = nodeId.match(/node-task-(\d+)/);
+                    if (match) {
+                        draggedTaskId = match[1];
+                        console.log('Extracted taskId from nodeId:', draggedTaskId);
+                    }
+                }
+            }
+            
+            // Final validation
+            if (!draggedTaskId || draggedTaskId === 'null' || draggedTaskId === 'undefined') {
+                console.error('Could not determine task ID for drag operation');
+                e.preventDefault();
+                return false;
+            }
+            
             draggedElement.classList.add('dragging');
             
             // Set drag data
             e.dataTransfer.effectAllowed = 'move';
             e.dataTransfer.setData('text/plain', draggedTaskId);
             
-            console.log('Drag started:', draggedTaskId);
+            console.log('Drag started with taskId:', draggedTaskId);
         }
         
         function handleDragEnd(e) {
@@ -3978,6 +4008,21 @@ except Exception as e:
         }
         
         function performTaskMove(taskId, newParentId, targetTaskId) {
+            // Validate inputs before making API call
+            console.log('performTaskMove called with:', { taskId, newParentId, targetTaskId });
+            
+            if (!taskId || taskId === 'null' || taskId === 'undefined') {
+                console.error('Invalid taskId for move operation:', taskId);
+                showToast('Error: Invalid task ID for move operation', 'error');
+                return;
+            }
+            
+            if (!newParentId || newParentId === 'null' || newParentId === 'undefined') {
+                console.error('Invalid newParentId for move operation:', newParentId);
+                showToast('Error: Invalid parent ID for move operation', 'error');
+                return;
+            }
+            
             // Show loading state
             const loadingMessage = document.createElement('div');
             loadingMessage.className = 'loading';
@@ -3989,6 +4034,8 @@ except Exception as e:
                 task_id: taskId,
                 new_parent_id: newParentId
             });
+            
+            console.log('API call params:', params.toString());
             
             // Add project ID if moving to project root
             if (newParentId === 'root' && window.currentHierarchy.type === 'project') {
