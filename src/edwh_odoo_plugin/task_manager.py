@@ -767,13 +767,16 @@ class TaskManager(OdooBase):
             except:
                 pass
         
-        # Add user info
+        # Add user info - always include for debugging
         user_id, user_name = self.extract_user_from_task(task)
-        if user_name != 'Unassigned':
-            task_dict['user'] = user_name
-            task_dict['user_id'] = user_id
+        task_dict['user'] = user_name
+        task_dict['user_id'] = user_id
         
-        # Add stage info
+        # Add stage info - try multiple approaches
+        task_dict['stage_name'] = 'No stage'
+        task_dict['stage_id'] = None
+        
+        # Try stage_id field
         if hasattr(task, 'stage_id') and task.stage_id:
             try:
                 stage_value = task.stage_id
@@ -793,10 +796,22 @@ class TaskManager(OdooBase):
                         task_dict['stage_name'] = 'Unknown'
                 else:
                     task_dict['stage_name'] = str(stage_value)
-            except:
+            except Exception as stage_error:
+                if self.verbose:
+                    print(f"⚠️ Error getting stage for task {task.id}: {stage_error}")
                 task_dict['stage_name'] = 'Unknown'
-        else:
-            task_dict['stage_name'] = 'No stage'
+        
+        # Try alternative stage field names
+        for stage_field in ['task_stage_id', 'project_task_stage_id', 'kanban_stage_id']:
+            if task_dict['stage_name'] in ['No stage', 'Unknown'] and hasattr(task, stage_field):
+                try:
+                    stage_value = getattr(task, stage_field)
+                    if stage_value and hasattr(stage_value, 'name'):
+                        task_dict['stage_name'] = stage_value.name
+                        task_dict['stage_id'] = stage_value.id if hasattr(stage_value, 'id') else stage_value
+                        break
+                except:
+                    continue
         
         # Add priority
         priority_value = getattr(task, 'priority', '0')
@@ -860,27 +875,27 @@ class TaskManager(OdooBase):
 
     def _print_task_details(self, task, indent):
         """Print detailed task information with proper indentation"""
-        # Assigned user
+        # Assigned user - always show if available
         if task.get('user') and task['user'] != 'Unassigned':
             print(f"{indent}👤 {task['user']}")
         
-        # Stage/Status
+        # Stage/Status - always show if available
         if task.get('stage_name') and task['stage_name'] not in ['Unknown', 'No stage']:
             print(f"{indent}📊 {task['stage_name']}")
         
-        # Priority (convert to 3-star system)
+        # Priority (convert to 3-star system) - always show if not normal
         priority_value = task.get('priority', '0')
         if priority_value and priority_value != '0':
             priority_stars = self._convert_priority_to_stars(priority_value)
             print(f"{indent}🔥 {priority_stars}")
         
-        # Deadline
+        # Deadline - always show if available
         if task.get('deadline'):
             print(f"{indent}📅 Deadline: {task['deadline']}")
         
-        # State (only show if not default)
+        # State (always show for debugging)
         state_value = task.get('state', 'draft')
-        if state_value and state_value not in ['draft', 'normal']:
+        if state_value:
             # Clean up state display
             if state_value.startswith('01_'):
                 state_display = state_value[3:].replace('_', ' ').title()
@@ -893,6 +908,13 @@ class TaskManager(OdooBase):
         if kanban_value and kanban_value not in ['normal', 'functools.partial'] and not str(kanban_value).startswith('functools.partial'):
             kanban_display = kanban_value.replace('_', ' ').title()
             print(f"{indent}🎯 Status: {kanban_display}")
+        
+        # Debug: Show all available task data if verbose
+        if self.verbose:
+            print(f"{indent}🔍 DEBUG - Available task data:")
+            for key, value in task.items():
+                if key not in ['id', 'name', 'children']:
+                    print(f"{indent}   {key}: {value}")
         
         # Blocking relationships
         blocking_info = self._get_blocking_info(task['id'])
