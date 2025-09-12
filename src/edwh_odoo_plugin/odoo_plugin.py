@@ -416,3 +416,267 @@ def web(c: Context,
             'success': False,
             'error': str(e)
         }
+
+
+@task(
+    help={
+        'subtask_id': 'ID of the subtask to move',
+        'new_parent_id': 'ID of the new parent task',
+        'project_id': 'Optional: Move to different project (project ID)',
+        'verbose': 'Show detailed information'
+    },
+    positional=['subtask_id', 'new_parent_id'],
+    hookable=True
+)
+def move_subtask(c: Context,
+                subtask_id: int,
+                new_parent_id: int,
+                project_id: int = None,
+                verbose: bool = False):
+    """
+    Move a subtask to a new parent task, optionally changing project
+    
+    Examples:
+        edwh odoo.move-subtask 123 456
+        edwh odoo.move-subtask 123 456 --project-id 789
+        edwh odoo.move-subtask 123 456 --verbose
+    """
+    from .task_manager import TaskManager
+    
+    if verbose:
+        print("🔄 Moving Subtask")
+        print("=" * 30)
+    
+    try:
+        manager = TaskManager(verbose=verbose)
+        result = manager.move_subtask(subtask_id, new_parent_id, project_id)
+        
+        if result['success']:
+            print(f"✅ Subtask moved successfully!")
+            if verbose:
+                print(f"   Subtask: {result['subtask_name']} (ID: {subtask_id})")
+                print(f"   New parent: {result['new_parent_name']} (ID: {new_parent_id})")
+                if project_id:
+                    print(f"   Project: {result['project_name']} (ID: {project_id})")
+        else:
+            print(f"❌ Failed to move subtask: {result['error']}")
+        
+        return result
+        
+    except Exception as e:
+        print(f"❌ Error: {e}")
+        if verbose:
+            import traceback
+            print(f"   Traceback: {traceback.format_exc()}")
+        
+        return {
+            'success': False,
+            'error': str(e)
+        }
+
+
+@task(
+    help={
+        'task_id': 'ID of the task to promote to main task',
+        'verbose': 'Show detailed information'
+    },
+    positional=['task_id'],
+    hookable=True
+)
+def promote_task(c: Context,
+                task_id: int,
+                verbose: bool = False):
+    """
+    Promote a subtask to a main task (remove parent relationship)
+    
+    Examples:
+        edwh odoo.promote-task 123
+        edwh odoo.promote-task 123 --verbose
+    """
+    from .task_manager import TaskManager
+    
+    if verbose:
+        print("⬆️ Promoting Task")
+        print("=" * 30)
+    
+    try:
+        manager = TaskManager(verbose=verbose)
+        result = manager.promote_task(task_id)
+        
+        if result['success']:
+            print(f"✅ Task promoted successfully!")
+            if verbose:
+                print(f"   Task: {result['task_name']} (ID: {task_id})")
+                print(f"   Former parent: {result['former_parent_name']}")
+        else:
+            print(f"❌ Failed to promote task: {result['error']}")
+        
+        return result
+        
+    except Exception as e:
+        print(f"❌ Error: {e}")
+        if verbose:
+            import traceback
+            print(f"   Traceback: {traceback.format_exc()}")
+        
+        return {
+            'success': False,
+            'error': str(e)
+        }
+
+
+@task(
+    help={
+        'subtask_ids': 'Comma-separated list of subtask IDs to move',
+        'new_parent_id': 'ID of the new parent task',
+        'project_id': 'Optional: Move to different project (project ID)',
+        'verbose': 'Show detailed information'
+    },
+    positional=['subtask_ids', 'new_parent_id'],
+    hookable=True
+)
+def move_subtasks(c: Context,
+                 subtask_ids: str,
+                 new_parent_id: int,
+                 project_id: int = None,
+                 verbose: bool = False):
+    """
+    Move multiple subtasks to a new parent task, optionally changing project
+    
+    Examples:
+        edwh odoo.move-subtasks "123,124,125" 456
+        edwh odoo.move-subtasks "123,124,125" 456 --project-id 789
+    """
+    from .task_manager import TaskManager
+    
+    # Parse subtask IDs
+    try:
+        ids = [int(id.strip()) for id in subtask_ids.split(',')]
+    except ValueError:
+        print("❌ Error: Invalid subtask IDs format. Use comma-separated integers.")
+        return {'success': False, 'error': 'Invalid ID format'}
+    
+    if verbose:
+        print("🔄 Moving Multiple Subtasks")
+        print("=" * 40)
+        print(f"   Moving {len(ids)} subtasks to parent {new_parent_id}")
+    
+    try:
+        manager = TaskManager(verbose=verbose)
+        result = manager.move_multiple_subtasks(ids, new_parent_id, project_id)
+        
+        if result['success']:
+            print(f"✅ {result['moved_count']}/{len(ids)} subtasks moved successfully!")
+            if result['failed_count'] > 0:
+                print(f"⚠️ {result['failed_count']} subtasks failed to move")
+                if verbose:
+                    for error in result['errors']:
+                        print(f"   - {error}")
+        else:
+            print(f"❌ Failed to move subtasks: {result['error']}")
+        
+        return result
+        
+    except Exception as e:
+        print(f"❌ Error: {e}")
+        if verbose:
+            import traceback
+            print(f"   Traceback: {traceback.format_exc()}")
+        
+        return {
+            'success': False,
+            'error': str(e)
+        }
+
+
+@task(
+    help={
+        'search_term': 'Search term to find tasks',
+        'verbose': 'Show detailed information'
+    },
+    hookable=True
+)
+def move_task_interactive(c: Context,
+                         search_term: str = None,
+                         verbose: bool = False):
+    """
+    Interactive task mover with search functionality
+    
+    Examples:
+        edwh odoo.move-task-interactive
+        edwh odoo.move-task-interactive "bug fix"
+    """
+    from .task_manager import TaskManager
+    
+    if verbose:
+        print("🔍 Interactive Task Mover")
+        print("=" * 40)
+    
+    try:
+        manager = TaskManager(verbose=verbose)
+        result = manager.interactive_move(search_term)
+        
+        return result
+        
+    except KeyboardInterrupt:
+        print(f"\n🛑 Interactive mode cancelled by user")
+        return {'success': False, 'error': 'Cancelled by user'}
+    except Exception as e:
+        print(f"❌ Error: {e}")
+        if verbose:
+            import traceback
+            print(f"   Traceback: {traceback.format_exc()}")
+        
+        return {
+            'success': False,
+            'error': str(e)
+        }
+
+
+@task(
+    help={
+        'task_id': 'ID of the task to show hierarchy for',
+        'depth': 'Maximum depth to show (default: 3)',
+        'verbose': 'Show detailed information'
+    },
+    positional=['task_id'],
+    hookable=True
+)
+def show_task_hierarchy(c: Context,
+                       task_id: int,
+                       depth: int = 3,
+                       verbose: bool = False):
+    """
+    Show task hierarchy (parent and children) for a given task
+    
+    Examples:
+        edwh odoo.show-task-hierarchy 123
+        edwh odoo.show-task-hierarchy 123 --depth 5
+    """
+    from .task_manager import TaskManager
+    
+    if verbose:
+        print("🌳 Task Hierarchy")
+        print("=" * 30)
+    
+    try:
+        manager = TaskManager(verbose=verbose)
+        result = manager.show_hierarchy(task_id, depth)
+        
+        if result['success']:
+            manager.print_hierarchy(result['hierarchy'])
+        else:
+            print(f"❌ Failed to get hierarchy: {result['error']}")
+        
+        return result
+        
+    except Exception as e:
+        print(f"❌ Error: {e}")
+        if verbose:
+            import traceback
+            print(f"   Traceback: {traceback.format_exc()}")
+        
+        return {
+            'success': False,
+            'error': str(e)
+        }
