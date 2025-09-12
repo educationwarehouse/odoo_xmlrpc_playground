@@ -49,30 +49,35 @@ class TaskManager(OdooBase):
             dict: Result with success status and details
         """
         try:
+            # Batch validation: get both tasks in a single query
+            task_ids = [int(subtask_id), int(new_parent_id)]
+            task_records = self.tasks.search_records([('id', 'in', task_ids)])
+            
+            # Create lookup dict for found tasks
+            found_tasks = {task.id: task for task in task_records}
+            
             # Validate subtask exists
-            subtask_records = self.tasks.search_records([('id', '=', subtask_id)])
-            if not subtask_records:
+            if int(subtask_id) not in found_tasks:
                 return {
                     'success': False,
                     'error': f'Subtask with ID {subtask_id} not found'
                 }
             
-            subtask = subtask_records[0]
+            subtask = found_tasks[int(subtask_id)]
             
             # Validate new parent exists
-            parent_records = self.tasks.search_records([('id', '=', new_parent_id)])
-            if not parent_records:
+            if int(new_parent_id) not in found_tasks:
                 return {
                     'success': False,
                     'error': f'Parent task with ID {new_parent_id} not found'
                 }
             
-            new_parent = parent_records[0]
+            new_parent = found_tasks[int(new_parent_id)]
             
             # Validate project if specified
             project_name = None
             if target_project_id:
-                project_records = self.projects.search_records([('id', '=', target_project_id)])
+                project_records = self.projects.search_records([('id', '=', int(target_project_id))])
                 if not project_records:
                     return {
                         'success': False,
@@ -81,16 +86,16 @@ class TaskManager(OdooBase):
                 project_name = project_records[0].name
             
             # Check for circular dependency
-            if self._would_create_circular_dependency(subtask_id, new_parent_id):
+            if self._would_create_circular_dependency(int(subtask_id), int(new_parent_id)):
                 return {
                     'success': False,
                     'error': 'Cannot move task: would create circular dependency'
                 }
             
             # Prepare update values
-            vals = {"parent_id": new_parent_id}
+            vals = {"parent_id": int(new_parent_id)}
             if target_project_id is not None:
-                vals["project_id"] = target_project_id
+                vals["project_id"] = int(target_project_id)
             
             if self.verbose:
                 print(f"🔄 Moving subtask {subtask_id} to parent {new_parent_id}")
@@ -98,7 +103,7 @@ class TaskManager(OdooBase):
                     print(f"   Also moving to project {target_project_id}")
             
             # Perform the move
-            success = self.tasks.write([subtask_id], vals)
+            success = self.tasks.write([int(subtask_id)], vals)
             
             if success:
                 return {
@@ -131,7 +136,7 @@ class TaskManager(OdooBase):
         """
         try:
             # Validate task exists
-            task_records = self.tasks.search_records([('id', '=', task_id)])
+            task_records = self.tasks.search_records([('id', '=', int(task_id))])
             if not task_records:
                 return {
                     'success': False,
@@ -154,7 +159,7 @@ class TaskManager(OdooBase):
                 print(f"   Removing parent: {former_parent_name}")
             
             # Remove parent relationship
-            success = self.tasks.write([task_id], {"parent_id": False})
+            success = self.tasks.write([int(task_id)], {"parent_id": False})
             
             if success:
                 return {
@@ -187,19 +192,28 @@ class TaskManager(OdooBase):
             dict: Result with success status and details
         """
         try:
+            # Convert all IDs to integers
+            int_subtask_ids = [int(sid) for sid in subtask_ids]
+            int_parent_id = int(new_parent_id)
+            int_project_id = int(target_project_id) if target_project_id else None
+            
+            # Batch validation: get parent and all subtasks in a single query
+            all_task_ids = int_subtask_ids + [int_parent_id]
+            task_records = self.tasks.search_records([('id', 'in', all_task_ids)])
+            found_tasks = {task.id: task for task in task_records}
+            
             # Validate new parent exists
-            parent_records = self.tasks.search_records([('id', '=', new_parent_id)])
-            if not parent_records:
+            if int_parent_id not in found_tasks:
                 return {
                     'success': False,
                     'error': f'Parent task with ID {new_parent_id} not found'
                 }
             
-            new_parent = parent_records[0]
+            new_parent = found_tasks[int_parent_id]
             
             # Validate project if specified
-            if target_project_id:
-                project_records = self.projects.search_records([('id', '=', target_project_id)])
+            if int_project_id:
+                project_records = self.projects.search_records([('id', '=', int_project_id)])
                 if not project_records:
                     return {
                         'success': False,
@@ -210,25 +224,24 @@ class TaskManager(OdooBase):
             failed_count = 0
             errors = []
             
-            for subtask_id in subtask_ids:
+            for subtask_id in int_subtask_ids:
                 try:
                     # Check for circular dependency
-                    if self._would_create_circular_dependency(subtask_id, new_parent_id):
+                    if self._would_create_circular_dependency(subtask_id, int_parent_id):
                         errors.append(f'Task {subtask_id}: would create circular dependency')
                         failed_count += 1
                         continue
                     
-                    # Validate subtask exists
-                    subtask_records = self.tasks.search_records([('id', '=', subtask_id)])
-                    if not subtask_records:
+                    # Validate subtask exists (already fetched in batch)
+                    if subtask_id not in found_tasks:
                         errors.append(f'Task {subtask_id}: not found')
                         failed_count += 1
                         continue
                     
                     # Prepare update values
-                    vals = {"parent_id": new_parent_id}
-                    if target_project_id is not None:
-                        vals["project_id"] = target_project_id
+                    vals = {"parent_id": int_parent_id}
+                    if int_project_id is not None:
+                        vals["project_id"] = int_project_id
                     
                     # Perform the move
                     success = self.tasks.write([subtask_id], vals)
@@ -410,7 +423,7 @@ class TaskManager(OdooBase):
         """
         try:
             # Get the main task
-            task_records = self.tasks.search_records([('id', '=', task_id)])
+            task_records = self.tasks.search_records([('id', '=', int(task_id))])
             if not task_records:
                 return {
                     'success': False,
@@ -606,7 +619,7 @@ class TaskManager(OdooBase):
                 print("🔍 Loading project hierarchy...", end="", flush=True)
             
             # Get the project
-            project_records = self.projects.search_records([('id', '=', project_id)])
+            project_records = self.projects.search_records([('id', '=', int(project_id))])
             if not project_records:
                 return {
                     'success': False,
