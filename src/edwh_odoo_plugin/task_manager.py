@@ -776,29 +776,85 @@ class TaskManager(OdooBase):
         # Add stage info
         if hasattr(task, 'stage_id') and task.stage_id:
             try:
-                task_dict['stage_name'] = task.stage_id.name if hasattr(task.stage_id, 'name') else 'Unknown'
-                task_dict['stage_id'] = task.stage_id.id if hasattr(task.stage_id, 'id') else task.stage_id
+                stage_value = task.stage_id
+                if hasattr(stage_value, 'name'):
+                    task_dict['stage_name'] = stage_value.name
+                    task_dict['stage_id'] = stage_value.id if hasattr(stage_value, 'id') else stage_value
+                elif str(stage_value).startswith('functools.partial'):
+                    # Handle partial objects
+                    try:
+                        actual_stage = stage_value()
+                        if hasattr(actual_stage, 'name'):
+                            task_dict['stage_name'] = actual_stage.name
+                            task_dict['stage_id'] = actual_stage.id
+                        else:
+                            task_dict['stage_name'] = str(actual_stage)
+                    except:
+                        task_dict['stage_name'] = 'Unknown'
+                else:
+                    task_dict['stage_name'] = str(stage_value)
             except:
-                pass
+                task_dict['stage_name'] = 'Unknown'
+        else:
+            task_dict['stage_name'] = 'No stage'
         
         # Add priority
-        task_dict['priority'] = getattr(task, 'priority', '0')
+        priority_value = getattr(task, 'priority', '0')
+        if str(priority_value).startswith('functools.partial'):
+            try:
+                task_dict['priority'] = str(priority_value())
+            except:
+                task_dict['priority'] = '0'
+        else:
+            task_dict['priority'] = str(priority_value)
         
         # Add state/status info
         if hasattr(task, 'state'):
-            task_dict['state'] = getattr(task, 'state', 'draft')
+            state_value = getattr(task, 'state', 'draft')
+            if str(state_value).startswith('functools.partial'):
+                try:
+                    task_dict['state'] = str(state_value())
+                except:
+                    task_dict['state'] = 'draft'
+            else:
+                task_dict['state'] = str(state_value)
+        else:
+            task_dict['state'] = 'draft'
         
         # Add kanban state (if available)
         if hasattr(task, 'kanban_state'):
-            task_dict['kanban_state'] = getattr(task, 'kanban_state', 'normal')
+            kanban_value = getattr(task, 'kanban_state', 'normal')
+            if str(kanban_value).startswith('functools.partial'):
+                try:
+                    task_dict['kanban_state'] = str(kanban_value())
+                except:
+                    task_dict['kanban_state'] = 'normal'
+            else:
+                task_dict['kanban_state'] = str(kanban_value)
+        else:
+            task_dict['kanban_state'] = 'normal'
         
         # Add date information
         if hasattr(task, 'date_deadline') and task.date_deadline:
-            task_dict['deadline'] = str(task.date_deadline)
+            deadline_value = task.date_deadline
+            if str(deadline_value).startswith('functools.partial'):
+                try:
+                    task_dict['deadline'] = str(deadline_value())
+                except:
+                    task_dict['deadline'] = None
+            else:
+                task_dict['deadline'] = str(deadline_value)
         
         # Add description
         if hasattr(task, 'description') and task.description:
-            task_dict['description'] = task.description
+            desc_value = task.description
+            if str(desc_value).startswith('functools.partial'):
+                try:
+                    task_dict['description'] = str(desc_value())
+                except:
+                    task_dict['description'] = ''
+            else:
+                task_dict['description'] = str(desc_value)
         
         return task_dict
 
@@ -822,12 +878,21 @@ class TaskManager(OdooBase):
         if task.get('deadline'):
             print(f"{indent}📅 Deadline: {task['deadline']}")
         
-        # State/Kanban state
-        if task.get('state') and task['state'] != 'draft':
-            print(f"{indent}🏷️ State: {task['state']}")
+        # State (only show if not default)
+        state_value = task.get('state', 'draft')
+        if state_value and state_value not in ['draft', 'normal']:
+            # Clean up state display
+            if state_value.startswith('01_'):
+                state_display = state_value[3:].replace('_', ' ').title()
+            else:
+                state_display = state_value.replace('_', ' ').title()
+            print(f"{indent}🏷️ State: {state_display}")
         
-        if task.get('kanban_state') and task['kanban_state'] != 'normal':
-            print(f"{indent}🎯 Status: {task['kanban_state']}")
+        # Kanban state (only show if not normal and not a partial object)
+        kanban_value = task.get('kanban_state', 'normal')
+        if kanban_value and kanban_value not in ['normal', 'functools.partial'] and not str(kanban_value).startswith('functools.partial'):
+            kanban_display = kanban_value.replace('_', ' ').title()
+            print(f"{indent}🎯 Status: {kanban_display}")
         
         # Blocking relationships
         blocking_info = self._get_blocking_info(task['id'])
