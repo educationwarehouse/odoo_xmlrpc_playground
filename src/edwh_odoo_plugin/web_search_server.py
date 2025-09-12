@@ -785,15 +785,32 @@ except Exception as e:
             new_parent_id = params.get('new_parent_id', [''])[0]
             project_id = params.get('project_id', [''])[0] or None
             
-            if not task_id:
-                self.send_json_response({'error': 'Task ID is required'}, 400)
+            # Validate task_id
+            if not task_id or task_id in ['null', 'undefined', '']:
+                self.send_json_response({'error': 'Valid Task ID is required'}, 400)
                 return
             
-            if not new_parent_id:
-                self.send_json_response({'error': 'New parent ID is required'}, 400)
+            # Validate new_parent_id
+            if not new_parent_id or new_parent_id in ['null', 'undefined', '']:
+                self.send_json_response({'error': 'Valid New parent ID is required'}, 400)
                 return
 
             print(f"🔄 Move task request: {task_id} -> {new_parent_id}")
+
+            # Validate that task_id can be converted to int
+            try:
+                int(task_id)
+            except (ValueError, TypeError):
+                self.send_json_response({'error': f'Task ID must be a valid number, got: {task_id}'}, 400)
+                return
+
+            # Validate that new_parent_id can be converted to int (unless it's 'root')
+            if new_parent_id != 'root':
+                try:
+                    int(new_parent_id)
+                except (ValueError, TypeError):
+                    self.send_json_response({'error': f'New parent ID must be a valid number or "root", got: {new_parent_id}'}, 400)
+                    return
 
             # Import TaskManager
             try:
