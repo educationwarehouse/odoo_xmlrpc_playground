@@ -24,8 +24,15 @@ class TaskManager(OdooBase):
     Task management functionality for moving subtasks and managing hierarchy
     """
 
-    def __init__(self, verbose=False):
+    def __init__(self, verbose=False, verbosity_level=None):
         """Initialize with .env configuration"""
+        # Handle both old verbose boolean and new verbosity_level
+        if verbosity_level is not None:
+            self.verbosity_level = verbosity_level
+            verbose = verbosity_level > 0
+        else:
+            self.verbosity_level = 1 if verbose else 0
+        
         super().__init__(verbose=verbose)
         self.searcher = OdooTextSearch(verbose=verbose)
 
@@ -547,13 +554,15 @@ class TaskManager(OdooBase):
         children = []
 
         try:
-            if self.verbose:
+            if self.verbosity_level >= 3:
                 print(f"🔍 Looking for children of task {task_id} at depth {current_depth}")
 
             # Use the working method: Direct parent_id search with integer task_id
             child_records = self.tasks.search_records([('parent_id', '=', int(task_id))])
             
-            if self.verbose:
+            if self.verbosity_level >= 2:
+                print(f"   Found {len(child_records)} children for task {task_id}")
+            elif self.verbosity_level >= 3:
                 print(f"   Method 1 (parent_id = {task_id}): Found {len(child_records)} children")
                 if child_records:
                     for child in child_records:
@@ -572,10 +581,10 @@ class TaskManager(OdooBase):
                 children.append(child_dict)
 
         except Exception as e:
-            if self.verbose:
+            if self.verbosity_level >= 2:
                 print(f"⚠️ Error getting children for task {task_id}: {e}")
 
-        if self.verbose:
+        if self.verbosity_level >= 3:
             print(f"   Final result: {len(children)} children for task {task_id}")
 
         return children
@@ -592,7 +601,8 @@ class TaskManager(OdooBase):
             dict: Result with project hierarchy data
         """
         try:
-            if not self.verbose:
+            # Progress indicators based on verbosity level
+            if self.verbosity_level == 0:
                 print("🔍 Loading project hierarchy...", end="", flush=True)
             
             # Get the project
@@ -605,17 +615,17 @@ class TaskManager(OdooBase):
             
             project = project_records[0]
             
-            if self.verbose:
+            if self.verbosity_level >= 2:
                 print(f"🔍 Searching for tasks in project {project_id} ('{project.name}')")
-            elif not self.verbose:
+            elif self.verbosity_level == 0:
                 print(f"\r🔍 Loading tasks...", end="", flush=True)
             
             # Get all tasks in this project - use the working approach
             all_tasks = self.tasks.search_records([('project_id', '=', int(project_id))])
             
-            if self.verbose:
+            if self.verbosity_level >= 2:
                 print(f"🔍 Found {len(all_tasks)} tasks in project {project_id}")
-            elif not self.verbose:
+            elif self.verbosity_level == 0:
                 print(f"\r🔍 Processing {len(all_tasks)} tasks...", end="", flush=True)
             
             # Separate main tasks (no parent) from subtasks
@@ -627,12 +637,12 @@ class TaskManager(OdooBase):
                 # Check if task has no parent (is a main task)
                 if not hasattr(task, 'parent_id') or not task.parent_id:
                     main_tasks.append(task)
-                    if self.verbose:
+                    if self.verbosity_level >= 2:
                         print(f"   Main task: {task.name} (ID: {task.id})")
             
-            if self.verbose:
+            if self.verbosity_level >= 2:
                 print(f"🔍 Found {len(main_tasks)} main tasks (without parents)")
-            elif not self.verbose:
+            elif self.verbosity_level == 0:
                 print(f"\r🔍 Building hierarchy...", end="", flush=True)
             
             # Build hierarchy for each main task
@@ -644,7 +654,7 @@ class TaskManager(OdooBase):
             }
             
             for i, main_task in enumerate(main_tasks):
-                if not self.verbose:
+                if self.verbosity_level == 0:
                     print(f"\r🔍 Processing task {i+1}/{len(main_tasks)}...", end="", flush=True)
                 
                 task_dict = self._task_to_dict(main_task)
@@ -654,7 +664,7 @@ class TaskManager(OdooBase):
                 
                 project_hierarchy['main_tasks'].append(task_dict)
             
-            if not self.verbose:
+            if self.verbosity_level == 0:
                 print(f"\r" + " " * 50 + "\r", end="")  # Clear progress line
             
             return {
@@ -679,19 +689,25 @@ class TaskManager(OdooBase):
         project_link = self.create_terminal_link(project_url, project['name'])
         print(f"📂 {project_link} (ID: {project['id']})")
         
-        # Print project details with tree indentation
-        if project.get('description'):
-            desc = project['description'][:100] + '...' if len(project['description']) > 100 else project['description']
-            print(f"│  📝 {desc}")
-        if project.get('partner_name'):
-            print(f"│  🏢 Client: {project['partner_name']}")
+        # Print project details based on verbosity level
+        if self.verbosity_level >= 1:
+            if project.get('description'):
+                desc = project['description'][:100] + '...' if len(project['description']) > 100 else project['description']
+                print(f"│  📝 {desc}")
+            if project.get('partner_name'):
+                print(f"│  🏢 Client: {project['partner_name']}")
+        
         if project.get('user_name'):
             print(f"│  👤 Manager: {project['user_name']}")
-        if project.get('stage_name'):
+        
+        if self.verbosity_level >= 1 and project.get('stage_name'):
             print(f"│  📊 Stage: {project['stage_name']}")
         
-        # Print summary
-        print(f"│  📊 Summary: {hierarchy['total_tasks']} tasks ({hierarchy['main_task_count']} main, {hierarchy['total_tasks'] - hierarchy['main_task_count']} subtasks)")
+        # Print summary - always show but adjust detail level
+        if self.verbosity_level >= 1:
+            print(f"│  📊 Summary: {hierarchy['total_tasks']} tasks ({hierarchy['main_task_count']} main, {hierarchy['total_tasks'] - hierarchy['main_task_count']} subtasks)")
+        else:
+            print(f"│  📊 {hierarchy['total_tasks']} tasks ({hierarchy['main_task_count']} main, {hierarchy['total_tasks'] - hierarchy['main_task_count']} subtasks)")
         
         # Print main tasks and their hierarchies as part of the project tree
         if hierarchy['main_tasks']:
@@ -874,55 +890,119 @@ class TaskManager(OdooBase):
         return task_dict
 
     def _print_task_details(self, task, indent):
-        """Print detailed task information with proper indentation"""
-        # Assigned user - always show if available
-        if task.get('user') and task['user'] != 'Unassigned':
-            print(f"{indent}👤 {task['user']}")
+        """Print detailed task information with proper indentation based on verbosity level"""
         
-        # Stage/Status - always show if available
-        if task.get('stage_name') and task['stage_name'] not in ['Unknown', 'No stage']:
-            print(f"{indent}📊 {task['stage_name']}")
+        # Level 0 (default): Only show essential non-default info
+        if self.verbosity_level == 0:
+            # Only show if assigned
+            if task.get('user') and task['user'] != 'Unassigned':
+                print(f"{indent}👤 {task['user']}")
+            
+            # Only show if not default stage
+            if task.get('stage_name') and task['stage_name'] not in ['Unknown', 'No stage']:
+                print(f"{indent}📊 {task['stage_name']}")
+            
+            # Only show if priority is set
+            priority_value = task.get('priority', '0')
+            if priority_value and priority_value != '0':
+                priority_stars = self._convert_priority_to_stars(priority_value)
+                print(f"{indent}🔥 {priority_stars}")
+            
+            # Only show state if not draft/normal
+            state_value = task.get('state', 'draft')
+            if state_value and state_value not in ['draft', 'normal']:
+                if state_value.startswith('01_'):
+                    state_display = state_value[3:].replace('_', ' ').title()
+                else:
+                    state_display = state_value.replace('_', ' ').title()
+                print(f"{indent}🏷️ {state_display}")
         
-        # Priority (convert to 3-star system) - always show if not normal
-        priority_value = task.get('priority', '0')
-        if priority_value and priority_value != '0':
-            priority_stars = self._convert_priority_to_stars(priority_value)
-            print(f"{indent}🔥 {priority_stars}")
+        # Level 1 (-v): Show more task details
+        elif self.verbosity_level == 1:
+            # Always show assigned user
+            if task.get('user') and task['user'] != 'Unassigned':
+                print(f"{indent}👤 {task['user']}")
+            
+            # Always show stage if available
+            if task.get('stage_name') and task['stage_name'] not in ['Unknown', 'No stage']:
+                print(f"{indent}📊 {task['stage_name']}")
+            
+            # Always show priority if set
+            priority_value = task.get('priority', '0')
+            if priority_value and priority_value != '0':
+                priority_stars = self._convert_priority_to_stars(priority_value)
+                print(f"{indent}🔥 {priority_stars}")
+            
+            # Show deadline if available
+            if task.get('deadline'):
+                print(f"{indent}📅 Deadline: {task['deadline']}")
+            
+            # Show state
+            state_value = task.get('state', 'draft')
+            if state_value and state_value not in ['draft']:
+                if state_value.startswith('01_'):
+                    state_display = state_value[3:].replace('_', ' ').title()
+                else:
+                    state_display = state_value.replace('_', ' ').title()
+                print(f"{indent}🏷️ State: {state_display}")
+            
+            # Show modified date
+            if task.get('write_date'):
+                print(f"{indent}📅 Modified: {task['write_date']}")
         
-        # Deadline - always show if available
-        if task.get('deadline'):
-            print(f"{indent}📅 Deadline: {task['deadline']}")
+        # Level 2 (-vv): Add IDs and more details
+        elif self.verbosity_level == 2:
+            # Show user with ID
+            if task.get('user') and task['user'] != 'Unassigned':
+                user_id_info = f" (ID: {task['user_id']})" if task.get('user_id') else ""
+                print(f"{indent}👤 {task['user']}{user_id_info}")
+            
+            # Show stage with ID
+            if task.get('stage_name') and task['stage_name'] not in ['Unknown', 'No stage']:
+                stage_id_info = f" (ID: {task['stage_id']})" if task.get('stage_id') else ""
+                print(f"{indent}📊 {task['stage_name']}{stage_id_info}")
+            
+            # Show priority with raw value
+            priority_value = task.get('priority', '0')
+            if priority_value and priority_value != '0':
+                priority_stars = self._convert_priority_to_stars(priority_value)
+                print(f"{indent}🔥 {priority_stars} - Priority: {priority_value}")
+            
+            # Show deadline
+            if task.get('deadline'):
+                print(f"{indent}📅 Deadline: {task['deadline']}")
+            
+            # Show state with raw value
+            state_value = task.get('state', 'draft')
+            if state_value:
+                if state_value.startswith('01_'):
+                    state_display = state_value[3:].replace('_', ' ').title()
+                else:
+                    state_display = state_value.replace('_', ' ').title()
+                print(f"{indent}🏷️ State: {state_display} ({state_value})")
+            
+            # Show dates
+            if task.get('write_date'):
+                print(f"{indent}📅 Modified: {task['write_date']}")
+            if task.get('create_date'):
+                print(f"{indent}📅 Created: {task['create_date']}")
         
-        # State (always show for debugging)
-        state_value = task.get('state', 'draft')
-        if state_value:
-            # Clean up state display
-            if state_value.startswith('01_'):
-                state_display = state_value[3:].replace('_', ' ').title()
-            else:
-                state_display = state_value.replace('_', ' ').title()
-            print(f"{indent}🏷️ State: {state_display}")
-        
-        # Kanban state (only show if not normal and not a partial object)
-        kanban_value = task.get('kanban_state', 'normal')
-        if kanban_value and kanban_value not in ['normal', 'functools.partial'] and not str(kanban_value).startswith('functools.partial'):
-            kanban_display = kanban_value.replace('_', ' ').title()
-            print(f"{indent}🎯 Status: {kanban_display}")
-        
-        # Debug: Show all available task data if verbose
-        if self.verbose:
+        # Level 3 (-vvv/debug): Show all debug info
+        elif self.verbosity_level >= 3:
+            # Show all available task data
             print(f"{indent}🔍 DEBUG - Available task data:")
             for key, value in task.items():
                 if key not in ['id', 'name', 'children']:
                     print(f"{indent}   {key}: {value}")
         
-        # Blocking relationships
-        blocking_info = self._get_blocking_info(task['id'])
-        if blocking_info['blocking'] or blocking_info['blocked_by']:
-            if blocking_info['blocking']:
-                print(f"{indent}🚫 Blocking: {', '.join(map(str, blocking_info['blocking']))}")
-            if blocking_info['blocked_by']:
-                print(f"{indent}⛔ Blocked by: {', '.join(map(str, blocking_info['blocked_by']))}")
+        # Blocking relationships (level 1+)
+        if self.verbosity_level >= 1:
+            blocking_info = self._get_blocking_info(task['id'])
+            if blocking_info['blocking'] or blocking_info['blocked_by']:
+                if blocking_info['blocking']:
+                    print(f"{indent}🚫 Blocking: {', '.join(map(str, blocking_info['blocking']))}")
+                if blocking_info['blocked_by']:
+                    print(f"{indent}⛔ Blocked by: {', '.join(map(str, blocking_info['blocked_by']))}")
 
     def _convert_priority_to_stars(self, priority_value):
         """Convert Odoo priority to 3-star system"""
@@ -991,11 +1071,11 @@ class TaskManager(OdooBase):
                             elif 'blocking' in field_name or 'successor' in field_name:
                                 blocking_info['blocking'].extend(ids)
                             
-                            if self.verbose and ids:
+                            if self.verbosity_level >= 3 and ids:
                                 print(f"   Found {field_name}: {ids}")
                                 
                     except Exception as field_error:
-                        if self.verbose:
+                        if self.verbosity_level >= 3:
                             print(f"   Error accessing {field_name}: {field_error}")
             
             # Remove duplicates
@@ -1003,7 +1083,7 @@ class TaskManager(OdooBase):
             blocking_info['blocked_by'] = list(set(blocking_info['blocked_by']))
             
         except Exception as e:
-            if self.verbose:
+            if self.verbosity_level >= 2:
                 print(f"⚠️ Error getting blocking info for task {task_id}: {e}")
         
         return blocking_info

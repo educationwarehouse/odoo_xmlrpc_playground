@@ -686,7 +686,8 @@ def show_task_hierarchy(c: Context,
     help={
         'project_id': 'ID of the project to show hierarchy for',
         'depth': 'Maximum depth to show for task subtasks (default: 3)',
-        'verbose': 'Show detailed information'
+        'verbose': 'Show detailed information (-v for verbose, -vv for very verbose, -vvv for debug)',
+        'debug': 'Show debug information (equivalent to -vvv)'
     },
     positional=['project_id'],
     hookable=True
@@ -694,23 +695,39 @@ def show_task_hierarchy(c: Context,
 def show_project_hierarchy(c: Context,
                           project_id: int,
                           depth: int = 3,
-                          verbose: bool = False):
+                          verbose: int = 0,
+                          debug: bool = False):
     """
     Show complete project hierarchy with all tasks and their subtasks
     
+    Verbosity levels:
+        (none)  - Clean, essential info only
+        -v      - Add task details (assigned users, stages, priorities, dates)
+        -vv     - Add connection info and processing details
+        -vvv    - Add debug information and field extraction details
+        --debug - Same as -vvv
+    
     Examples:
         edwh odoo.show-project-hierarchy 123
-        edwh odoo.show-project-hierarchy 123 --depth 5
-        edwh odoo.show-project-hierarchy 123 --verbose
+        edwh odoo.show-project-hierarchy 123 --depth 5 -v
+        edwh odoo.show-project-hierarchy 123 -vv
+        edwh odoo.show-project-hierarchy 123 --debug
     """
     from .task_manager import TaskManager
     
-    if verbose:
+    # Handle debug flag
+    if debug:
+        verbose = 3
+    
+    # Determine verbosity level from -v flags
+    verbosity_level = verbose if isinstance(verbose, int) else (1 if verbose else 0)
+    
+    if verbosity_level >= 2:
         print("🌳 Project Hierarchy")
         print("=" * 30)
     
     try:
-        manager = TaskManager(verbose=verbose)
+        manager = TaskManager(verbosity_level=verbosity_level)
         result = manager.show_project_hierarchy(project_id, depth)
         
         if result['success']:
@@ -722,7 +739,7 @@ def show_project_hierarchy(c: Context,
         
     except Exception as e:
         print(f"❌ Error: {e}")
-        if verbose:
+        if verbosity_level >= 2:
             import traceback
             print(f"   Traceback: {traceback.format_exc()}")
         
