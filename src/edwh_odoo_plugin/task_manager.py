@@ -940,15 +940,15 @@ class TaskManager(OdooBase):
             
             # Task details with labels
             if task.get('user') and task['user'] != 'Unassigned':
-                print(f"{indent}👤 {task['user']}")
+                print(f"{indent}👤 Assigned: {task['user']}")
             
             if task.get('stage_name') and task['stage_name'] not in ['Unknown', 'No stage']:
-                print(f"{indent}📊 {task['stage_name']}")
+                print(f"{indent}📊 Stage: {task['stage_name']}")
             
             priority_value = task.get('priority', '0')
             if priority_value and priority_value != '0':
                 priority_stars = self._convert_priority_to_stars(priority_value)
-                print(f"{indent}🔥 {priority_stars}")
+                print(f"{indent}🔥 Priority: {priority_stars}")
             
             if task.get('deadline'):
                 print(f"{indent}📅 Deadline: {task['deadline']}")
@@ -977,16 +977,16 @@ class TaskManager(OdooBase):
             # Task details with IDs
             if task.get('user') and task['user'] != 'Unassigned':
                 user_id_info = f" (ID: {task['user_id']})" if task.get('user_id') else ""
-                print(f"{indent}👤 {task['user']}{user_id_info}")
+                print(f"{indent}👤 Assigned: {task['user']}{user_id_info}")
             
             if task.get('stage_name') and task['stage_name'] not in ['Unknown', 'No stage']:
                 stage_id_info = f" (ID: {task['stage_id']})" if task.get('stage_id') else ""
-                print(f"{indent}📊 {task['stage_name']}{stage_id_info}")
+                print(f"{indent}📊 Stage: {task['stage_name']}{stage_id_info}")
             
             priority_value = task.get('priority', '0')
             if priority_value and priority_value != '0':
                 priority_stars = self._convert_priority_to_stars(priority_value)
-                print(f"{indent}🔥 {priority_stars} - Priority: {priority_value}")
+                print(f"{indent}🔥 Priority: {priority_stars} (Raw: {priority_value})")
             
             if task.get('deadline'):
                 print(f"{indent}📅 Deadline: {task['deadline']}")
@@ -999,7 +999,7 @@ class TaskManager(OdooBase):
                     state_display = state_value[3:].replace('_', ' ').title()
                 else:
                     state_display = state_value.replace('_', ' ').title()
-                print(f"{indent}🏷️ State: {state_display} ({state_value})")
+                print(f"{indent}🏷️ State: {state_display} (Raw: {state_value})")
             
             if task.get('write_date'):
                 print(f"{indent}📅 Modified: {task['write_date']}")
@@ -1008,13 +1008,22 @@ class TaskManager(OdooBase):
         
         # Level 3 (-vvv/debug): Show all debug info
         elif self.verbosity_level >= 3:
+            # Blocking relationships first (even in debug mode)
+            if blocking_info['blocked_by']:
+                print(f"{indent}⛔ Blocked by: {', '.join(map(str, blocking_info['blocked_by']))}")
+            if blocking_info['blocking']:
+                print(f"{indent}🚫 Blocking: {', '.join(map(str, blocking_info['blocking']))}")
+            
             # Show all available task data
-            print(f"{indent}🔍 DEBUG - Available task data:")
-            for key, value in task.items():
+            print(f"{indent}🔍 DEBUG - All task data:")
+            for key, value in sorted(task.items()):
                 if key not in ['id', 'name', 'children']:
-                    print(f"{indent}   {key}: {value}")
-        
-        # Note: Blocking relationships are now handled within each verbosity level above
+                    print(f"{indent}   {key}: {repr(value)}")
+            
+            # Show blocking info debug
+            print(f"{indent}🔍 DEBUG - Blocking info:")
+            print(f"{indent}   blocked_by: {blocking_info['blocked_by']}")
+            print(f"{indent}   blocking: {blocking_info['blocking']}")
 
     def _convert_priority_to_stars(self, priority_value):
         """Convert Odoo priority to 3-star system"""
