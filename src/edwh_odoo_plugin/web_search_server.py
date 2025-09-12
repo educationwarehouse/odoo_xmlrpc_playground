@@ -3843,34 +3843,63 @@ except Exception as e:
         
         function handleDragStart(e) {
             draggedElement = e.target.closest('.tree-node');
-            draggedTaskId = draggedElement.dataset.taskId;
             
-            // Debug logging
-            console.log('Drag started - element:', draggedElement);
-            console.log('Drag started - taskId from dataset:', draggedTaskId);
-            console.log('Drag started - all datasets:', draggedElement.dataset);
+            // Try multiple ways to get the task ID
+            let taskId = null;
             
-            // Fallback: try to extract from node ID if dataset.taskId is null
-            if (!draggedTaskId || draggedTaskId === 'null' || draggedTaskId === 'undefined') {
+            // Method 1: Direct from dataset
+            taskId = draggedElement.dataset.taskId;
+            console.log('Method 1 - dataset.taskId:', taskId);
+            
+            // Method 2: Extract from node ID
+            if (!taskId || taskId === 'null' || taskId === 'undefined' || taskId === 'unknown') {
                 const nodeId = draggedElement.dataset.nodeId;
-                console.log('TaskId was null, trying nodeId:', nodeId);
+                console.log('Method 2 - trying nodeId:', nodeId);
                 if (nodeId) {
-                    // Extract ID from node-task-123 format
                     const match = nodeId.match(/node-task-(\d+)/);
                     if (match) {
-                        draggedTaskId = match[1];
-                        console.log('Extracted taskId from nodeId:', draggedTaskId);
+                        taskId = match[1];
+                        console.log('Method 2 - extracted from nodeId:', taskId);
+                    }
+                }
+            }
+            
+            // Method 3: Look for ID in the tree label
+            if (!taskId || taskId === 'null' || taskId === 'undefined' || taskId === 'unknown') {
+                const labelElement = draggedElement.querySelector('.tree-label small');
+                if (labelElement) {
+                    const labelText = labelElement.textContent;
+                    const match = labelText.match(/ID:\s*(\d+)/);
+                    if (match) {
+                        taskId = match[1];
+                        console.log('Method 3 - extracted from label:', taskId);
+                    }
+                }
+            }
+            
+            // Method 4: Look in the URL
+            if (!taskId || taskId === 'null' || taskId === 'undefined' || taskId === 'unknown') {
+                const linkElement = draggedElement.querySelector('.tree-label a');
+                if (linkElement && linkElement.href) {
+                    const match = linkElement.href.match(/id=(\d+)/);
+                    if (match) {
+                        taskId = match[1];
+                        console.log('Method 4 - extracted from URL:', taskId);
                     }
                 }
             }
             
             // Final validation
-            if (!draggedTaskId || draggedTaskId === 'null' || draggedTaskId === 'undefined') {
-                console.error('Could not determine task ID for drag operation');
+            if (!taskId || taskId === 'null' || taskId === 'undefined' || taskId === 'unknown' || !/^\d+$/.test(taskId)) {
+                console.error('Could not determine valid task ID for drag operation. TaskId:', taskId);
+                console.error('Element:', draggedElement);
+                console.error('All datasets:', draggedElement.dataset);
+                showToast('Cannot move task: Invalid task ID', 'error');
                 e.preventDefault();
                 return false;
             }
             
+            draggedTaskId = taskId;
             draggedElement.classList.add('dragging');
             
             // Highlight all potential drop zones
@@ -3880,7 +3909,7 @@ except Exception as e:
             e.dataTransfer.effectAllowed = 'move';
             e.dataTransfer.setData('text/plain', draggedTaskId);
             
-            console.log('Drag started with taskId:', draggedTaskId);
+            console.log('✅ Drag started successfully with taskId:', draggedTaskId);
         }
         
         function handleDragEnd(e) {
@@ -4006,6 +4035,7 @@ except Exception as e:
             const targetNode = e.target.closest('.tree-node');
             
             if (!targetNode || !draggedElement || targetNode === draggedElement) {
+                console.log('Drop cancelled: invalid target or same element');
                 return;
             }
             
@@ -4014,8 +4044,44 @@ except Exception as e:
                 return;
             }
             
-            const targetTaskId = targetNode.dataset.taskId;
+            // Get target task ID using the same robust method
+            let targetTaskId = null;
             const targetType = targetNode.dataset.type;
+            
+            if (targetType === 'task') {
+                // Try multiple methods to get target task ID
+                targetTaskId = targetNode.dataset.taskId;
+                
+                if (!targetTaskId || targetTaskId === 'null' || targetTaskId === 'undefined' || targetTaskId === 'unknown') {
+                    const nodeId = targetNode.dataset.nodeId;
+                    if (nodeId) {
+                        const match = nodeId.match(/node-task-(\d+)/);
+                        if (match) {
+                            targetTaskId = match[1];
+                        }
+                    }
+                }
+                
+                if (!targetTaskId || targetTaskId === 'null' || targetTaskId === 'undefined' || targetTaskId === 'unknown') {
+                    const labelElement = targetNode.querySelector('.tree-label small');
+                    if (labelElement) {
+                        const match = labelElement.textContent.match(/ID:\s*(\d+)/);
+                        if (match) {
+                            targetTaskId = match[1];
+                        }
+                    }
+                }
+                
+                if (!targetTaskId || targetTaskId === 'null' || targetTaskId === 'undefined' || targetTaskId === 'unknown') {
+                    const linkElement = targetNode.querySelector('.tree-label a');
+                    if (linkElement && linkElement.href) {
+                        const match = linkElement.href.match(/id=(\d+)/);
+                        if (match) {
+                            targetTaskId = match[1];
+                        }
+                    }
+                }
+            }
             
             // Determine new parent ID
             let newParentId;
@@ -4025,6 +4091,19 @@ except Exception as e:
                 newParentId = targetTaskId;
             }
             
+            // Validate we have valid IDs
+            if (!draggedTaskId || !/^\d+$/.test(draggedTaskId)) {
+                showToast('Cannot move task: Invalid source task ID', 'error');
+                console.error('Invalid draggedTaskId:', draggedTaskId);
+                return;
+            }
+            
+            if (targetType === 'task' && (!newParentId || !/^\d+$/.test(newParentId))) {
+                showToast('Cannot move task: Invalid target task ID', 'error');
+                console.error('Invalid newParentId:', newParentId);
+                return;
+            }
+            
             // Show confirmation with custom modal
             const draggedTaskName = draggedElement.querySelector('.tree-label a').textContent;
             const targetName = targetNode.querySelector('.tree-label a').textContent;
@@ -4032,6 +4111,14 @@ except Exception as e:
             const message = targetType === 'project' 
                 ? `Move "${draggedTaskName}" to become a main task in project "${targetName}"?`
                 : `Move "${draggedTaskName}" to become a subtask of "${targetName}"?`;
+            
+            console.log('About to show confirmation modal for move:', {
+                draggedTaskId,
+                newParentId,
+                targetType,
+                draggedTaskName,
+                targetName
+            });
             
             const confirmed = await showModal('Move Task', message, 'Move', 'Cancel');
             
@@ -4066,16 +4153,17 @@ except Exception as e:
         
         function performTaskMove(taskId, newParentId, targetTaskId) {
             // Validate inputs before making API call
-            console.log('performTaskMove called with:', { taskId, newParentId, targetTaskId });
+            console.log('🔄 performTaskMove called with:', { taskId, newParentId, targetTaskId });
             
-            if (!taskId || taskId === 'null' || taskId === 'undefined') {
-                console.error('Invalid taskId for move operation:', taskId);
+            // Strict validation
+            if (!taskId || taskId === 'null' || taskId === 'undefined' || taskId === 'unknown' || !/^\d+$/.test(taskId)) {
+                console.error('❌ Invalid taskId for move operation:', taskId);
                 showToast('Error: Invalid task ID for move operation', 'error');
                 return;
             }
             
-            if (!newParentId || newParentId === 'null' || newParentId === 'undefined') {
-                console.error('Invalid newParentId for move operation:', newParentId);
+            if (!newParentId || (newParentId !== 'root' && (newParentId === 'null' || newParentId === 'undefined' || newParentId === 'unknown' || !/^\d+$/.test(newParentId)))) {
+                console.error('❌ Invalid newParentId for move operation:', newParentId);
                 showToast('Error: Invalid parent ID for move operation', 'error');
                 return;
             }
@@ -4092,17 +4180,23 @@ except Exception as e:
                 new_parent_id: newParentId
             });
             
-            console.log('API call params:', params.toString());
-            
             // Add project ID if moving to project root
-            if (newParentId === 'root' && window.currentHierarchy.type === 'project') {
+            if (newParentId === 'root' && window.currentHierarchy && window.currentHierarchy.type === 'project') {
                 params.append('project_id', window.currentHierarchy.root.id);
             }
             
-            fetch('/api/move-task?' + params.toString())
-                .then(response => response.json())
+            const apiUrl = '/api/move-task?' + params.toString();
+            console.log('🌐 Making API call to:', apiUrl);
+            console.log('📋 API params:', params.toString());
+            
+            fetch(apiUrl)
+                .then(response => {
+                    console.log('📡 API response status:', response.status);
+                    return response.json();
+                })
                 .then(data => {
                     loadingMessage.remove();
+                    console.log('📦 API response data:', data);
                     
                     if (data.success) {
                         // Store for undo
@@ -4114,17 +4208,17 @@ except Exception as e:
                         };
                         
                         // Show success message
-                        showMoveSuccess(data.message);
+                        showMoveSuccess(data.message || 'Task moved successfully');
                         
                         // Refresh hierarchy
                         refreshCurrentHierarchy();
                     } else {
-                        showToast('Move failed: ' + data.error, 'error');
+                        showToast('Move failed: ' + (data.error || 'Unknown error'), 'error');
                     }
                 })
                 .catch(error => {
                     loadingMessage.remove();
-                    console.error('Move error:', error);
+                    console.error('❌ Move API error:', error);
                     showToast('Move failed: ' + error.message, 'error');
                 });
         }
