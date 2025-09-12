@@ -866,6 +866,31 @@ except Exception as e:
             except (ValueError, TypeError):
                 return {'level': 0, 'name': 'Normal', 'stars': 1}
 
+        def clean_stage_name(stage_name):
+            """Clean stage names by removing prefixes and formatting properly"""
+            if not stage_name or stage_name == 'No Stage':
+                return 'No Stage'
+            
+            # Remove common prefixes like "01_", "04_", etc.
+            import re
+            cleaned = re.sub(r'^\d+_', '', str(stage_name))
+            
+            # Convert underscores to spaces and title case
+            cleaned = cleaned.replace('_', ' ').title()
+            
+            # Handle common stage names
+            stage_mapping = {
+                'Inbox': 'Inbox',
+                'In Progress': 'In Progress', 
+                'Done': 'Done',
+                'Cancelled': 'Cancelled',
+                'Waiting': 'Waiting',
+                'New': 'New',
+                'Draft': 'Draft'
+            }
+            
+            return stage_mapping.get(cleaned, cleaned)
+
         def convert_task_node(task_data):
             """Convert a task node to web format"""
             if not task_data:
@@ -874,12 +899,16 @@ except Exception as e:
             # Normalize priority
             priority_info = normalize_priority(task_data.get('priority', '0'))
             
+            # Clean stage name
+            raw_stage = task_data.get('stage_name', 'No Stage')
+            cleaned_stage = clean_stage_name(raw_stage)
+            
             node = {
                 'id': task_data.get('id'),
                 'name': clean_text(task_data.get('name', 'Untitled')),
                 'type': 'task',
                 'url': f"https://education-warehouse.odoo.com/web#id={task_data.get('id')}&model=project.task&view_type=form",
-                'stage': clean_text(task_data.get('stage_name', 'No Stage')),
+                'stage': cleaned_stage,
                 'priority': priority_info,
                 'metadata': {}
             }
@@ -888,7 +917,7 @@ except Exception as e:
             if task_data.get('user'):
                 node['metadata']['user'] = clean_text(task_data['user'])
             if task_data.get('stage_name'):
-                node['metadata']['stage'] = clean_text(task_data['stage_name'])
+                node['metadata']['stage'] = cleaned_stage
             if task_data.get('priority'):
                 node['metadata']['priority'] = clean_text(task_data['priority'])
             if task_data.get('state'):
@@ -1742,14 +1771,28 @@ except Exception as e:
         }
         
         .tree-node.drag-over {
-            background-color: rgba(0, 123, 255, 0.1);
+            background-color: rgba(0, 123, 255, 0.15);
             border: 2px dashed var(--accent-color);
-            border-radius: 4px;
+            border-radius: 6px;
+            box-shadow: 0 0 10px rgba(0, 123, 255, 0.3);
         }
         
         .tree-node.dragging {
-            opacity: 0.5;
-            transform: rotate(2deg);
+            opacity: 0.6;
+            transform: rotate(1deg) scale(0.98);
+            z-index: 1000;
+        }
+        
+        .tree-node.valid-drop-target {
+            background-color: rgba(40, 167, 69, 0.1);
+            border: 2px solid var(--success-color);
+            border-radius: 6px;
+        }
+        
+        .tree-node.invalid-drop-target {
+            background-color: rgba(220, 53, 69, 0.1);
+            border: 2px solid var(--danger-color);
+            border-radius: 6px;
         }
         
         .tree-node-content {
@@ -1921,6 +1964,151 @@ except Exception as e:
         
         .breadcrumb-item a:hover {
             text-decoration: underline;
+        }
+        
+        /* Custom Modal System */
+        .custom-modal {
+            display: none;
+            position: fixed;
+            z-index: 10000;
+            left: 0;
+            top: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.5);
+            backdrop-filter: blur(2px);
+        }
+        
+        .custom-modal.show {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        .modal-content {
+            background: var(--card-bg);
+            border-radius: 12px;
+            padding: 25px;
+            max-width: 500px;
+            width: 90%;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+            border: 1px solid var(--border-color);
+        }
+        
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            padding-bottom: 15px;
+            border-bottom: 1px solid var(--border-color);
+        }
+        
+        .modal-title {
+            font-size: 1.2rem;
+            font-weight: 600;
+            color: var(--text-color);
+        }
+        
+        .modal-close {
+            background: none;
+            border: none;
+            font-size: 24px;
+            cursor: pointer;
+            color: var(--text-color);
+            padding: 0;
+            width: 30px;
+            height: 30px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border-radius: 50%;
+        }
+        
+        .modal-close:hover {
+            background: var(--border-color);
+        }
+        
+        .modal-body {
+            margin-bottom: 20px;
+            color: var(--text-color);
+            line-height: 1.5;
+        }
+        
+        .modal-actions {
+            display: flex;
+            gap: 10px;
+            justify-content: flex-end;
+        }
+        
+        /* Toast Notification System */
+        .toast-container {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            z-index: 10001;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+        }
+        
+        .toast {
+            background: var(--card-bg);
+            border: 1px solid var(--border-color);
+            border-radius: 8px;
+            padding: 15px 20px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+            max-width: 400px;
+            opacity: 0;
+            transform: translateX(100%);
+            transition: all 0.3s ease;
+        }
+        
+        .toast.show {
+            opacity: 1;
+            transform: translateX(0);
+        }
+        
+        .toast.success {
+            border-left: 4px solid var(--success-color);
+        }
+        
+        .toast.error {
+            border-left: 4px solid var(--danger-color);
+        }
+        
+        .toast.warning {
+            border-left: 4px solid var(--warning-color);
+        }
+        
+        .toast-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+        
+        .toast-title {
+            font-weight: 600;
+            color: var(--text-color);
+        }
+        
+        .toast-close {
+            background: none;
+            border: none;
+            font-size: 18px;
+            cursor: pointer;
+            color: var(--text-color);
+            opacity: 0.7;
+        }
+        
+        .toast-close:hover {
+            opacity: 1;
+        }
+        
+        .toast-body {
+            color: var(--text-color);
+            font-size: 14px;
         }
         
         .pins-header {
@@ -2298,6 +2486,25 @@ except Exception as e:
         </div>
     </div>
     
+    <!-- Custom Modal -->
+    <div id="customModal" class="custom-modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <div class="modal-title" id="modalTitle">Confirm Action</div>
+                <button class="modal-close" onclick="closeModal()">&times;</button>
+            </div>
+            <div class="modal-body" id="modalBody">
+                Are you sure you want to proceed?
+            </div>
+            <div class="modal-actions">
+                <button class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+                <button class="btn btn-primary" id="modalConfirmBtn" onclick="confirmModal()">Confirm</button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Toast Container -->
+    <div id="toastContainer" class="toast-container"></div>
     
     <script>
         // Theme management
@@ -2501,14 +2708,14 @@ except Exception as e:
             .then(response => response.json())
             .then(data => {
                 if (data.success) {
-                    alert('Settings saved successfully!');
+                    showToast('Settings saved successfully!', 'success');
                 } else {
-                    alert('Error saving settings: ' + data.error);
+                    showToast('Error saving settings: ' + data.error, 'error');
                 }
             })
             .catch(error => {
                 console.error('Error saving settings:', error);
-                alert('Error saving settings');
+                showToast('Error saving settings', 'error');
             });
         }
         
@@ -3000,19 +3207,20 @@ except Exception as e:
             updatePinButtonsInResults();
         }
         
-        function clearAllPins() {
-            if (confirm('Clear all pinned items?')) {
+        async function clearAllPins() {
+            const confirmed = await showModal('Clear All Pins', 'Clear all pinned items?', 'Clear', 'Cancel');
+            if (confirmed) {
                 localStorage.removeItem('pinnedItems');
                 loadPins();
                 updatePinButtonsInResults();
-                alert('All pins cleared successfully!');
+                showToast('All pins cleared successfully!', 'success');
             }
         }
         
         function exportPins() {
             const pins = JSON.parse(localStorage.getItem('pinnedItems') || '[]');
             if (pins.length === 0) {
-                alert('No pins to export');
+                showToast('No pins to export', 'warning');
                 return;
             }
             
@@ -3073,12 +3281,13 @@ except Exception as e:
         }
         
         // Cache management
-        function clearCache() {
-            if (confirm('Clear all cached search results and search history?')) {
+        async function clearCache() {
+            const confirmed = await showModal('Clear Cache', 'Clear all cached search results and search history?', 'Clear', 'Cancel');
+            if (confirmed) {
                 localStorage.removeItem('cachedSearchResults');
                 localStorage.removeItem('searchHistory');
                 loadSearchHistory();
-                alert('Cache and search history cleared successfully!');
+                showToast('Cache and search history cleared successfully!', 'success');
             }
         }
         
@@ -3100,7 +3309,7 @@ except Exception as e:
             const type = document.getElementById('hierarchyType').value;
             
             if (!searchValue) {
-                alert('Please enter a project name, task name, or ID');
+                showToast('Please enter a project name, task name, or ID', 'warning');
                 return;
             }
             
@@ -3574,6 +3783,9 @@ except Exception as e:
         let draggedElement = null;
         let draggedTaskId = null;
         let lastMoveOperation = null;
+        let dragEnterTimeout = null;
+        let dragLeaveTimeout = null;
+        let currentDropTarget = null;
         
         function setupDragAndDrop() {
             const draggableElements = document.querySelectorAll('.tree-node-content.draggable');
@@ -3585,7 +3797,7 @@ except Exception as e:
                 element.addEventListener('dragend', handleDragEnd);
             });
             
-            // Setup drop events
+            // Setup drop events with improved handling
             dropTargets.forEach(target => {
                 target.addEventListener('dragover', handleDragOver);
                 target.addEventListener('dragenter', handleDragEnter);
@@ -3612,13 +3824,24 @@ except Exception as e:
                 draggedElement.classList.remove('dragging');
             }
             
-            // Clean up all drag-over classes
-            document.querySelectorAll('.tree-node.drag-over').forEach(node => {
-                node.classList.remove('drag-over');
+            // Clean up all drag classes
+            document.querySelectorAll('.tree-node').forEach(node => {
+                clearDropTargetClasses(node);
             });
+            
+            // Clear timeouts
+            if (dragEnterTimeout) {
+                clearTimeout(dragEnterTimeout);
+                dragEnterTimeout = null;
+            }
+            if (dragLeaveTimeout) {
+                clearTimeout(dragLeaveTimeout);
+                dragLeaveTimeout = null;
+            }
             
             draggedElement = null;
             draggedTaskId = null;
+            currentDropTarget = null;
         }
         
         function handleDragOver(e) {
@@ -3630,19 +3853,51 @@ except Exception as e:
             e.preventDefault();
             const targetNode = e.target.closest('.tree-node');
             
-            if (targetNode && targetNode !== draggedElement && isValidDropTarget(targetNode)) {
-                targetNode.classList.add('drag-over');
+            if (!targetNode || targetNode === draggedElement) return;
+            
+            // Clear any pending leave timeout
+            if (dragLeaveTimeout) {
+                clearTimeout(dragLeaveTimeout);
+                dragLeaveTimeout = null;
+            }
+            
+            // Clear previous target
+            if (currentDropTarget && currentDropTarget !== targetNode) {
+                clearDropTargetClasses(currentDropTarget);
+            }
+            
+            currentDropTarget = targetNode;
+            
+            // Add appropriate visual feedback
+            if (isValidDropTarget(targetNode)) {
+                targetNode.classList.add('drag-over', 'valid-drop-target');
+                targetNode.classList.remove('invalid-drop-target');
+            } else {
+                targetNode.classList.add('invalid-drop-target');
+                targetNode.classList.remove('drag-over', 'valid-drop-target');
             }
         }
         
         function handleDragLeave(e) {
             const targetNode = e.target.closest('.tree-node');
-            if (targetNode) {
-                targetNode.classList.remove('drag-over');
+            if (!targetNode) return;
+            
+            // Use timeout to prevent flickering when moving between child elements
+            dragLeaveTimeout = setTimeout(() => {
+                if (targetNode === currentDropTarget) {
+                    clearDropTargetClasses(targetNode);
+                    currentDropTarget = null;
+                }
+            }, 50);
+        }
+        
+        function clearDropTargetClasses(node) {
+            if (node) {
+                node.classList.remove('drag-over', 'valid-drop-target', 'invalid-drop-target');
             }
         }
         
-        function handleDrop(e) {
+        async function handleDrop(e) {
             e.preventDefault();
             const targetNode = e.target.closest('.tree-node');
             
@@ -3651,7 +3906,7 @@ except Exception as e:
             }
             
             if (!isValidDropTarget(targetNode)) {
-                alert('Invalid drop target. Cannot create circular dependency.');
+                showToast('Invalid drop target. Cannot create circular dependency.', 'error');
                 return;
             }
             
@@ -3666,7 +3921,7 @@ except Exception as e:
                 newParentId = targetTaskId;
             }
             
-            // Show confirmation
+            // Show confirmation with custom modal
             const draggedTaskName = draggedElement.querySelector('.tree-label a').textContent;
             const targetName = targetNode.querySelector('.tree-label a').textContent;
             
@@ -3674,12 +3929,14 @@ except Exception as e:
                 ? `Move "${draggedTaskName}" to become a main task in project "${targetName}"?`
                 : `Move "${draggedTaskName}" to become a subtask of "${targetName}"?`;
             
-            if (confirm(message)) {
+            const confirmed = await showModal('Move Task', message, 'Move', 'Cancel');
+            
+            if (confirmed) {
                 performTaskMove(draggedTaskId, newParentId, targetTaskId);
             }
             
             // Clean up
-            targetNode.classList.remove('drag-over');
+            clearDropTargetClasses(targetNode);
         }
         
         function isValidDropTarget(targetNode) {
@@ -3741,36 +3998,18 @@ except Exception as e:
                         // Refresh hierarchy
                         refreshCurrentHierarchy();
                     } else {
-                        alert('Move failed: ' + data.error);
+                        showToast('Move failed: ' + data.error, 'error');
                     }
                 })
                 .catch(error => {
                     loadingMessage.remove();
                     console.error('Move error:', error);
-                    alert('Move failed: ' + error.message);
+                    showToast('Move failed: ' + error.message, 'error');
                 });
         }
         
         function showMoveSuccess(message) {
-            const notification = document.createElement('div');
-            notification.style.cssText = `
-                position: fixed;
-                top: 20px;
-                right: 20px;
-                background: var(--success-color);
-                color: white;
-                padding: 10px 15px;
-                border-radius: 5px;
-                z-index: 1000;
-                box-shadow: 0 2px 10px rgba(0,0,0,0.2);
-            `;
-            notification.textContent = '✅ ' + message;
-            
-            document.body.appendChild(notification);
-            
-            setTimeout(() => {
-                notification.remove();
-            }, 3000);
+            showToast(message, 'success', 4000);
         }
         
         function refreshCurrentHierarchy() {
@@ -3781,6 +4020,89 @@ except Exception as e:
             
             // Reload the hierarchy
             loadHierarchy(hierarchyType, hierarchyId);
+        }
+        
+        // Custom Modal System
+        let modalCallback = null;
+        
+        function showModal(title, message, confirmText = 'Confirm', cancelText = 'Cancel') {
+            return new Promise((resolve) => {
+                document.getElementById('modalTitle').textContent = title;
+                document.getElementById('modalBody').textContent = message;
+                document.getElementById('modalConfirmBtn').textContent = confirmText;
+                
+                modalCallback = resolve;
+                document.getElementById('customModal').classList.add('show');
+            });
+        }
+        
+        function closeModal() {
+            document.getElementById('customModal').classList.remove('show');
+            if (modalCallback) {
+                modalCallback(false);
+                modalCallback = null;
+            }
+        }
+        
+        function confirmModal() {
+            document.getElementById('customModal').classList.remove('show');
+            if (modalCallback) {
+                modalCallback(true);
+                modalCallback = null;
+            }
+        }
+        
+        // Toast Notification System
+        function showToast(message, type = 'success', duration = 3000) {
+            const container = document.getElementById('toastContainer');
+            const toast = document.createElement('div');
+            toast.className = `toast ${type}`;
+            
+            const toastId = 'toast-' + Date.now();
+            toast.id = toastId;
+            
+            const icon = {
+                'success': '✅',
+                'error': '❌',
+                'warning': '⚠️',
+                'info': 'ℹ️'
+            }[type] || '✅';
+            
+            toast.innerHTML = `
+                <div class="toast-header">
+                    <div class="toast-title">${icon} ${type.charAt(0).toUpperCase() + type.slice(1)}</div>
+                    <button class="toast-close" onclick="closeToast('${toastId}')">&times;</button>
+                </div>
+                <div class="toast-body">${message}</div>
+            `;
+            
+            container.appendChild(toast);
+            
+            // Trigger animation
+            setTimeout(() => {
+                toast.classList.add('show');
+            }, 10);
+            
+            // Auto-remove
+            if (duration > 0) {
+                setTimeout(() => {
+                    closeToast(toastId);
+                }, duration);
+            }
+            
+            return toastId;
+        }
+        
+        function closeToast(toastId) {
+            const toast = document.getElementById(toastId);
+            if (toast) {
+                toast.classList.remove('show');
+                setTimeout(() => {
+                    if (toast.parentNode) {
+                        toast.parentNode.removeChild(toast);
+                    }
+                }, 300);
+            }
         }
         
         // Initialize
