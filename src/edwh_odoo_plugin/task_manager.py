@@ -454,11 +454,15 @@ class TaskManager(OdooBase):
             self._print_children_recursive(hierarchy['children'], "")
 
     def _print_children_recursive(self, children, indent):
-        """Recursively print children with proper indentation"""
+        """Recursively print children with proper indentation and clickable links"""
         for i, child in enumerate(children):
             is_last = i == len(children) - 1
             current_indent = "└──" if is_last else "├──"
-            print(f"{indent}{current_indent} {child['name']} (ID: {child['id']})")
+            
+            # Create clickable link for child task
+            task_url = self.get_task_url(child['id'])
+            task_link = self.create_terminal_link(task_url, child['name'])
+            print(f"{indent}{current_indent} {task_link} (ID: {child['id']})")
             
             if child.get('children'):
                 next_indent = indent + ("   " if is_last else "│  ")
@@ -646,11 +650,13 @@ class TaskManager(OdooBase):
             }
 
     def print_project_hierarchy(self, hierarchy):
-        """Print project hierarchy as one unified tree"""
+        """Print project hierarchy as one unified tree with clickable links"""
         project = hierarchy['project']
         
-        # Print project as root of the tree
-        print(f"📂 {project['name']} (ID: {project['id']})")
+        # Print project as root of the tree with clickable link
+        project_url = self.get_project_url(project['id'])
+        project_link = self.create_terminal_link(project_url, project['name'])
+        print(f"📂 {project_link} (ID: {project['id']})")
         
         # Print project details with tree indentation
         if project.get('description'):
@@ -672,7 +678,10 @@ class TaskManager(OdooBase):
                 is_last_main = i == len(hierarchy['main_tasks']) - 1
                 main_prefix = "└──" if is_last_main else "├──"
                 
-                print(f"{main_prefix} {main_task['name']} (ID: {main_task['id']})")
+                # Create clickable link for main task
+                task_url = self.get_task_url(main_task['id'])
+                task_link = self.create_terminal_link(task_url, main_task['name'])
+                print(f"{main_prefix} {task_link} (ID: {main_task['id']})")
                 
                 # Print task details
                 if main_task.get('user'):
