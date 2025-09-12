@@ -3500,11 +3500,7 @@ except Exception as e:
             const stage = node.stage || 'No Stage';
             const priorityLevel = node.priority ? node.priority.level : 0;
             
-            // Ensure we have a valid ID
-            const taskId = node.id || 'unknown';
-            console.log('Rendering tree node:', { nodeId, taskId, name: node.name, type: node.type });
-            
-            let html = `<div class="tree-node" data-node-id="${nodeId}" data-task-id="${taskId}" data-stage="${stage}" data-priority="${priorityLevel}" data-type="${node.type}">`;
+            let html = `<div class="tree-node" data-node-id="${nodeId}" data-task-id="${node.id}" data-stage="${stage}" data-priority="${priorityLevel}" data-type="${node.type}">`;
             
             // Drop indicator (for drag & drop)
             html += '<div class="drop-indicator"></div>';
@@ -3849,56 +3845,6 @@ except Exception as e:
             
             // Method 1: Direct from dataset
             taskId = draggedElement.dataset.taskId;
-            console.log('Method 1 - dataset.taskId:', taskId);
-            
-            // Method 2: Extract from node ID
-            if (!taskId || taskId === 'null' || taskId === 'undefined' || taskId === 'unknown') {
-                const nodeId = draggedElement.dataset.nodeId;
-                console.log('Method 2 - trying nodeId:', nodeId);
-                if (nodeId) {
-                    const match = nodeId.match(/node-task-(\d+)/);
-                    if (match) {
-                        taskId = match[1];
-                        console.log('Method 2 - extracted from nodeId:', taskId);
-                    }
-                }
-            }
-            
-            // Method 3: Look for ID in the tree label
-            if (!taskId || taskId === 'null' || taskId === 'undefined' || taskId === 'unknown') {
-                const labelElement = draggedElement.querySelector('.tree-label small');
-                if (labelElement) {
-                    const labelText = labelElement.textContent;
-                    const match = labelText.match(/ID:\s*(\d+)/);
-                    if (match) {
-                        taskId = match[1];
-                        console.log('Method 3 - extracted from label:', taskId);
-                    }
-                }
-            }
-            
-            // Method 4: Look in the URL
-            if (!taskId || taskId === 'null' || taskId === 'undefined' || taskId === 'unknown') {
-                const linkElement = draggedElement.querySelector('.tree-label a');
-                if (linkElement && linkElement.href) {
-                    const match = linkElement.href.match(/id=(\d+)/);
-                    if (match) {
-                        taskId = match[1];
-                        console.log('Method 4 - extracted from URL:', taskId);
-                    }
-                }
-            }
-            
-            // Final validation
-            if (!taskId || taskId === 'null' || taskId === 'undefined' || taskId === 'unknown' || !/^\d+$/.test(taskId)) {
-                console.error('Could not determine valid task ID for drag operation. TaskId:', taskId);
-                console.error('Element:', draggedElement);
-                console.error('All datasets:', draggedElement.dataset);
-                showToast('Cannot move task: Invalid task ID', 'error');
-                e.preventDefault();
-                return false;
-            }
-            
             draggedTaskId = taskId;
             draggedElement.classList.add('dragging');
             
@@ -3908,8 +3854,6 @@ except Exception as e:
             // Set drag data
             e.dataTransfer.effectAllowed = 'move';
             e.dataTransfer.setData('text/plain', draggedTaskId);
-            
-            console.log('✅ Drag started successfully with taskId:', draggedTaskId);
         }
         
         function handleDragEnd(e) {
@@ -4034,6 +3978,9 @@ except Exception as e:
             e.preventDefault();
             const targetNode = e.target.closest('.tree-node');
             
+            // Capture the draggedTaskId immediately before any async operations
+            const taskIdToMove = draggedTaskId;
+            
             if (!targetNode || !draggedElement || targetNode === draggedElement) {
                 console.log('Drop cancelled: invalid target or same element');
                 return;
@@ -4092,9 +4039,9 @@ except Exception as e:
             }
             
             // Validate we have valid IDs
-            if (!draggedTaskId || !/^\d+$/.test(draggedTaskId)) {
+            if (!taskIdToMove || !/^\d+$/.test(taskIdToMove)) {
                 showToast('Cannot move task: Invalid source task ID', 'error');
-                console.error('Invalid draggedTaskId:', draggedTaskId);
+                console.error('Invalid taskIdToMove:', taskIdToMove);
                 return;
             }
             
@@ -4112,18 +4059,11 @@ except Exception as e:
                 ? `Move "${draggedTaskName}" to become a main task in project "${targetName}"?`
                 : `Move "${draggedTaskName}" to become a subtask of "${targetName}"?`;
             
-            console.log('About to show confirmation modal for move:', {
-                draggedTaskId,
-                newParentId,
-                targetType,
-                draggedTaskName,
-                targetName
-            });
             
             const confirmed = await showModal('Move Task', message, 'Move', 'Cancel');
             
             if (confirmed) {
-                performTaskMove(draggedTaskId, newParentId, targetTaskId);
+                performTaskMove(taskIdToMove, newParentId, targetTaskId);
             }
             
             // Clean up
@@ -4186,17 +4126,10 @@ except Exception as e:
             }
             
             const apiUrl = '/api/move-task?' + params.toString();
-            console.log('🌐 Making API call to:', apiUrl);
-            console.log('📋 API params:', params.toString());
-            
             fetch(apiUrl)
-                .then(response => {
-                    console.log('📡 API response status:', response.status);
-                    return response.json();
-                })
+                .then(response => response.json())
                 .then(data => {
                     loadingMessage.remove();
-                    console.log('📦 API response data:', data);
                     
                     if (data.success) {
                         // Store for undo
