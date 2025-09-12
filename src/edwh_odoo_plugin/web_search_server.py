@@ -775,6 +775,69 @@ except Exception as e:
                 'traceback': traceback_msg
             }, 500)
 
+    def handle_move_task_api(self, query_string):
+        """Handle task move API requests for drag & drop"""
+        try:
+            params = parse_qs(query_string)
+            
+            # Extract parameters
+            task_id = params.get('task_id', [''])[0]
+            new_parent_id = params.get('new_parent_id', [''])[0]
+            project_id = params.get('project_id', [''])[0] or None
+            
+            if not task_id:
+                self.send_json_response({'error': 'Task ID is required'}, 400)
+                return
+            
+            if not new_parent_id:
+                self.send_json_response({'error': 'New parent ID is required'}, 400)
+                return
+
+            print(f"🔄 Move task request: {task_id} -> {new_parent_id}")
+
+            # Import TaskManager
+            try:
+                from .task_manager import TaskManager
+            except ImportError:
+                try:
+                    from edwh_odoo_plugin.task_manager import TaskManager
+                except ImportError:
+                    from task_manager import TaskManager
+
+            # Perform the move
+            manager = TaskManager(verbose=False)
+            
+            # Handle special case: moving to project root (promote to main task)
+            if new_parent_id == 'root':
+                result = manager.promote_task(int(task_id))
+            else:
+                result = manager.move_subtask(int(task_id), int(new_parent_id), project_id)
+            
+            if result['success']:
+                self.send_json_response({
+                    'success': True,
+                    'message': 'Task moved successfully',
+                    'details': result
+                })
+            else:
+                self.send_json_response({
+                    'success': False,
+                    'error': result['error']
+                }, 400)
+                
+        except Exception as e:
+            import traceback
+            error_msg = f"Move task error: {str(e)}"
+            traceback_msg = traceback.format_exc()
+
+            print(f"❌ {error_msg}")
+            print(f"   Traceback: {traceback_msg}")
+
+            self.send_json_response({
+                'error': error_msg,
+                'traceback': traceback_msg
+            }, 500)
+
     def convert_hierarchy_for_web(self, hierarchy, hierarchy_type):
         """Convert terminal-friendly hierarchy to web-friendly format"""
         def clean_text(text):
