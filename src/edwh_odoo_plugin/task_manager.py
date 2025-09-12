@@ -597,74 +597,11 @@ class TaskManager(OdooBase):
             if self.verbose:
                 print(f"🔍 Searching for tasks in project {project_id} ('{project.name}')")
             
-            # Get all tasks in this project with debugging
-            all_tasks = self.tasks.search_records([('project_id', '=', project_id)])
+            # Get all tasks in this project - use the working approach
+            all_tasks = self.tasks.search_records([('project_id', '=', int(project_id))])
             
             if self.verbose:
                 print(f"🔍 Found {len(all_tasks)} tasks in project {project_id}")
-                
-                # If no tasks found, let's debug by checking known tasks
-                if len(all_tasks) == 0:
-                    print(f"🔍 DEBUG: No tasks found, checking known tasks 3352, 3353...")
-                    known_task_ids = [3352, 3353, 3354, 3355, 3356]
-                    for task_id in known_task_ids:
-                        try:
-                            task_records = self.tasks.search_records([('id', '=', task_id)])
-                            if task_records:
-                                task = task_records[0]
-                                if hasattr(task, 'project_id') and task.project_id:
-                                    actual_project_id = task.project_id.id if hasattr(task.project_id, 'id') else task.project_id
-                                    actual_project_name = task.project_id.name if hasattr(task.project_id, 'name') else 'Unknown'
-                                    print(f"   Task {task_id} ('{task.name}') belongs to project {actual_project_id} ('{actual_project_name}')")
-                                    
-                                    # If this task belongs to the project we're looking for, add it manually
-                                    if actual_project_id == project_id:
-                                        print(f"   ✅ Task {task_id} should be in this project!")
-                                        all_tasks.append(task)
-                                else:
-                                    print(f"   Task {task_id} has no project_id")
-                            else:
-                                print(f"   Task {task_id} not found")
-                        except Exception as task_error:
-                            print(f"   Error checking task {task_id}: {task_error}")
-                    
-                    # If we still have no tasks after manual check, try a broader search
-                    if len(all_tasks) == 0:
-                        print(f"🔍 DEBUG: Trying broader search approaches...")
-                        
-                        # Try searching without project filter to see if tasks exist at all
-                        try:
-                            test_tasks = self.tasks.search_records([('id', 'in', known_task_ids)])
-                            print(f"   Found {len(test_tasks)} tasks by direct ID search")
-                            for task in test_tasks:
-                                if hasattr(task, 'project_id') and task.project_id:
-                                    task_project_id = task.project_id.id if hasattr(task.project_id, 'id') else task.project_id
-                                    if task_project_id == project_id:
-                                        all_tasks.append(task)
-                                        print(f"   ✅ Added task {task.id} to all_tasks")
-                            
-                            # If we still have no tasks, try a different approach - search all tasks in this project
-                            if len(all_tasks) == 0:
-                                print(f"🔍 DEBUG: Trying alternative project search...")
-                                try:
-                                    # Try different project field approaches
-                                    alt_tasks = self.tasks.search_records([('project_id', '=', int(project_id))])
-                                    print(f"   Alternative search (int project_id): Found {len(alt_tasks)} tasks")
-                                    all_tasks.extend(alt_tasks)
-                                except Exception as alt_error:
-                                    print(f"   Alternative search failed: {alt_error}")
-                                    
-                                    # Last resort: manually add the known tasks that belong to this project
-                                    print(f"🔍 DEBUG: Last resort - manually adding known tasks...")
-                                    for task in test_tasks:
-                                        if hasattr(task, 'project_id') and task.project_id:
-                                            task_project_id = task.project_id.id if hasattr(task.project_id, 'id') else task.project_id
-                                            if task_project_id == project_id:
-                                                all_tasks.append(task)
-                                                print(f"   ✅ Manually added task {task.id}")
-                                        
-                        except Exception as broad_error:
-                            print(f"   Broader search failed: {broad_error}")
             
             # Separate main tasks (no parent) from subtasks
             main_tasks = []
@@ -709,28 +646,28 @@ class TaskManager(OdooBase):
             }
 
     def print_project_hierarchy(self, hierarchy):
-        """Print project hierarchy in a tree format"""
+        """Print project hierarchy as one unified tree"""
         project = hierarchy['project']
         
-        # Print project header
-        print(f"📂 PROJECT: {project['name']} (ID: {project['id']})")
+        # Print project as root of the tree
+        print(f"📂 {project['name']} (ID: {project['id']})")
+        
+        # Print project details with tree indentation
         if project.get('description'):
-            print(f"    📝 {project['description'][:100]}{'...' if len(project['description']) > 100 else ''}")
+            desc = project['description'][:100] + '...' if len(project['description']) > 100 else project['description']
+            print(f"│  📝 {desc}")
         if project.get('partner_name'):
-            print(f"    🏢 Client: {project['partner_name']}")
+            print(f"│  🏢 Client: {project['partner_name']}")
         if project.get('user_name'):
-            print(f"    👤 Manager: {project['user_name']}")
+            print(f"│  👤 Manager: {project['user_name']}")
         if project.get('stage_name'):
-            print(f"    📊 Stage: {project['stage_name']}")
+            print(f"│  📊 Stage: {project['stage_name']}")
         
-        print(f"\n📊 SUMMARY:")
-        print(f"    📋 Total tasks: {hierarchy['total_tasks']}")
-        print(f"    🎯 Main tasks: {hierarchy['main_task_count']}")
-        print(f"    📉 Subtasks: {hierarchy['total_tasks'] - hierarchy['main_task_count']}")
+        # Print summary
+        print(f"│  📊 Summary: {hierarchy['total_tasks']} tasks ({hierarchy['main_task_count']} main, {hierarchy['total_tasks'] - hierarchy['main_task_count']} subtasks)")
         
-        # Print main tasks and their hierarchies
+        # Print main tasks and their hierarchies as part of the project tree
         if hierarchy['main_tasks']:
-            print(f"\n🌳 TASK HIERARCHY:")
             for i, main_task in enumerate(hierarchy['main_tasks']):
                 is_last_main = i == len(hierarchy['main_tasks']) - 1
                 main_prefix = "└──" if is_last_main else "├──"
@@ -747,7 +684,7 @@ class TaskManager(OdooBase):
                     child_indent = "   " if is_last_main else "│  "
                     self._print_children_recursive(main_task['children'], child_indent)
         else:
-            print(f"\n📭 No tasks found in this project")
+            print(f"└── 📭 No tasks found in this project")
 
     def _project_to_dict(self, project):
         """Convert project record to dictionary"""
