@@ -539,8 +539,46 @@ class TaskManager(OdooBase):
         children = []
         
         try:
-            child_records = self.tasks.search_records([('parent_id', '=', task_id)])
+            if self.verbose:
+                print(f"🔍 Looking for children of task {task_id} at depth {current_depth}")
             
+            # Try multiple approaches to find children
+            child_records = []
+            
+            # Method 1: Direct parent_id search
+            try:
+                child_records = self.tasks.search_records([('parent_id', '=', task_id)])
+                if self.verbose:
+                    print(f"   Method 1 (parent_id =): Found {len(child_records)} children")
+            except Exception as e1:
+                if self.verbose:
+                    print(f"   Method 1 failed: {e1}")
+            
+            # Method 2: If no results, try with string conversion
+            if not child_records:
+                try:
+                    child_records = self.tasks.search_records([('parent_id', '=', str(task_id))])
+                    if self.verbose:
+                        print(f"   Method 2 (parent_id = str): Found {len(child_records)} children")
+                except Exception as e2:
+                    if self.verbose:
+                        print(f"   Method 2 failed: {e2}")
+            
+            # Method 3: If still no results, try browsing the parent and checking its children
+            if not child_records:
+                try:
+                    parent_task = self.tasks.browse(task_id)
+                    if hasattr(parent_task, 'child_ids') and parent_task.child_ids:
+                        child_ids = [child.id for child in parent_task.child_ids]
+                        if child_ids:
+                            child_records = self.tasks.search_records([('id', 'in', child_ids)])
+                            if self.verbose:
+                                print(f"   Method 3 (child_ids): Found {len(child_records)} children")
+                except Exception as e3:
+                    if self.verbose:
+                        print(f"   Method 3 failed: {e3}")
+            
+            # Process found children
             for child in child_records:
                 child_dict = self._task_to_dict(child)
                 
@@ -555,6 +593,9 @@ class TaskManager(OdooBase):
         except Exception as e:
             if self.verbose:
                 print(f"⚠️ Error getting children for task {task_id}: {e}")
+        
+        if self.verbose:
+            print(f"   Final result: {len(children)} children for task {task_id}")
         
         return children
 
