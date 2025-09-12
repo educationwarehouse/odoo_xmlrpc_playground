@@ -85,6 +85,8 @@ class WebSearchHandler(BaseHTTPRequestHandler):
         elif path.startswith('/api/hierarchy/task/'):
             task_id = self.extract_id_from_path(path, '/api/hierarchy/task/')
             self.handle_task_hierarchy_api(task_id)
+        elif path.startswith('/api/move-task/'):
+            self.handle_move_task_api(parsed_path.query)
         elif path.startswith('/static/'):
             self.serve_static_file(path)
         else:
@@ -784,16 +786,38 @@ except Exception as e:
             ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
             return ansi_escape.sub('', str(text))
 
+        def normalize_priority(priority_value):
+            """Convert priority to normalized format"""
+            try:
+                priority = int(priority_value) if priority_value else 0
+                if priority == 0:
+                    return {'level': 0, 'name': 'Normal', 'stars': 1}
+                elif priority == 1:
+                    return {'level': 1, 'name': 'High', 'stars': 2}
+                elif priority == 2:
+                    return {'level': 2, 'name': 'Urgent', 'stars': 3}
+                elif priority >= 3:
+                    return {'level': 3, 'name': 'Critical', 'stars': 4}
+                else:
+                    return {'level': 0, 'name': 'Normal', 'stars': 1}
+            except (ValueError, TypeError):
+                return {'level': 0, 'name': 'Normal', 'stars': 1}
+
         def convert_task_node(task_data):
             """Convert a task node to web format"""
             if not task_data:
                 return None
                 
+            # Normalize priority
+            priority_info = normalize_priority(task_data.get('priority', '0'))
+            
             node = {
                 'id': task_data.get('id'),
                 'name': clean_text(task_data.get('name', 'Untitled')),
                 'type': 'task',
                 'url': f"https://education-warehouse.odoo.com/web#id={task_data.get('id')}&model=project.task&view_type=form",
+                'stage': clean_text(task_data.get('stage_name', 'No Stage')),
+                'priority': priority_info,
                 'metadata': {}
             }
             
@@ -823,6 +847,25 @@ except Exception as e:
             
             return node
 
+        def collect_filter_data(node, stages=None, priorities=None):
+            """Recursively collect unique stages and priorities"""
+            if stages is None:
+                stages = set()
+            if priorities is None:
+                priorities = set()
+            
+            if node and node.get('type') == 'task':
+                if node.get('stage'):
+                    stages.add(node['stage'])
+                if node.get('priority'):
+                    priorities.add(node['priority']['level'])
+                
+                # Process children
+                for child in node.get('children', []):
+                    collect_filter_data(child, stages, priorities)
+            
+            return stages, priorities
+
         web_data = {}
         
         if hierarchy_type == 'project':
@@ -850,6 +893,13 @@ except Exception as e:
                 task_node = convert_task_node(main_task)
                 if task_node:
                     web_data['root']['children'].append(task_node)
+            
+            # Collect filter data
+            stages, priorities = collect_filter_data(web_data['root'])
+            web_data['filter_data'] = {
+                'stages': sorted(list(stages)),
+                'priorities': sorted(list(priorities))
+            }
                     
         elif hierarchy_type == 'task':
             # Task hierarchy
@@ -865,6 +915,13 @@ except Exception as e:
                 parent_node = convert_task_node(parent)
                 if parent_node:
                     web_data['parents'].append(parent_node)
+            
+            # Collect filter data
+            stages, priorities = collect_filter_data(web_data['root'])
+            web_data['filter_data'] = {
+                'stages': sorted(list(stages)),
+                'priorities': sorted(list(priorities))
+            }
         
         return web_data
 
@@ -1490,6 +1547,111 @@ except Exception as e:
             background: var(--bg-color);
         }
         
+        .hierarchy-filters {
+            margin-bottom: 20px;
+            padding: 15px;
+            background: var(--card-bg);
+            border-radius: 8px;
+            border: 1px solid var(--border-color);
+        }
+        
+        .filter-section {
+            margin-bottom: 15px;
+        }
+        
+        .filter-section:last-child {
+            margin-bottom: 0;
+        }
+        
+        .filter-label {
+            font-weight: 600;
+            margin-bottom: 8px;
+            display: block;
+            color: var(--text-color);
+        }
+        
+        .stage-filters {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+            margin-bottom: 10px;
+        }
+        
+        .stage-toggle {
+            padding: 4px 12px;
+            border: 1px solid var(--border-color);
+            border-radius: 20px;
+            background: var(--bg-color);
+            color: var(--text-color);
+            cursor: pointer;
+            font-size: 12px;
+            transition: all 0.2s;
+            user-select: none;
+        }
+        
+        .stage-toggle:hover {
+            background: var(--card-bg);
+        }
+        
+        .stage-toggle.active {
+            background: var(--accent-color);
+            color: white;
+            border-color: var(--accent-color);
+        }
+        
+        .stage-toggle.active:hover {
+            opacity: 0.9;
+        }
+        
+        .priority-filter {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .priority-slider {
+            flex: 1;
+            max-width: 200px;
+        }
+        
+        .priority-label {
+            font-size: 12px;
+            color: var(--text-color);
+            min-width: 60px;
+        }
+        
+        .filter-actions {
+            display: flex;
+            gap: 8px;
+            margin-top: 10px;
+        }
+        
+        .filter-btn {
+            padding: 4px 8px;
+            border: 1px solid var(--border-color);
+            border-radius: 4px;
+            background: var(--bg-color);
+            color: var(--text-color);
+            cursor: pointer;
+            font-size: 11px;
+            transition: all 0.2s;
+        }
+        
+        .filter-btn:hover {
+            background: var(--card-bg);
+        }
+        
+        .filter-summary {
+            font-size: 11px;
+            color: #666;
+            margin-top: 8px;
+            font-style: italic;
+        }
+        
+        [data-theme="dark"] .filter-summary {
+            color: #aaa;
+        }
+        
         .hierarchy-placeholder {
             text-align: center;
             padding: 40px 20px;
@@ -1509,6 +1671,22 @@ except Exception as e:
         .tree-node {
             margin: 2px 0;
             position: relative;
+            transition: opacity 0.3s, transform 0.2s;
+        }
+        
+        .tree-node.filtered-hidden {
+            display: none;
+        }
+        
+        .tree-node.drag-over {
+            background-color: rgba(0, 123, 255, 0.1);
+            border: 2px dashed var(--accent-color);
+            border-radius: 4px;
+        }
+        
+        .tree-node.dragging {
+            opacity: 0.5;
+            transform: rotate(2deg);
         }
         
         .tree-node-content {
@@ -1518,10 +1696,49 @@ except Exception as e:
             border-radius: 4px;
             transition: background-color 0.2s;
             cursor: pointer;
+            position: relative;
         }
         
         .tree-node-content:hover {
             background-color: var(--card-bg);
+        }
+        
+        .tree-node-content.draggable {
+            cursor: grab;
+        }
+        
+        .tree-node-content.draggable:active {
+            cursor: grabbing;
+        }
+        
+        .drag-handle {
+            opacity: 0;
+            margin-right: 4px;
+            cursor: grab;
+            color: #999;
+            transition: opacity 0.2s;
+            font-size: 12px;
+        }
+        
+        .tree-node-content:hover .drag-handle {
+            opacity: 1;
+        }
+        
+        .drag-handle:hover {
+            color: var(--accent-color);
+        }
+        
+        .drop-indicator {
+            height: 2px;
+            background: var(--accent-color);
+            margin: 2px 0;
+            border-radius: 1px;
+            opacity: 0;
+            transition: opacity 0.2s;
+        }
+        
+        .drop-indicator.active {
+            opacity: 1;
         }
         
         .tree-toggle {
@@ -1572,6 +1789,39 @@ except Exception as e:
         
         [data-theme="dark"] .tree-metadata {
             color: #aaa;
+        }
+        
+        .priority-stars {
+            color: #ffc107;
+            font-size: 10px;
+        }
+        
+        .stage-badge {
+            padding: 2px 6px;
+            border-radius: 10px;
+            font-size: 10px;
+            background: var(--border-color);
+            color: var(--text-color);
+        }
+        
+        .stage-badge.in-progress {
+            background: #007bff;
+            color: white;
+        }
+        
+        .stage-badge.done {
+            background: #28a745;
+            color: white;
+        }
+        
+        .stage-badge.waiting {
+            background: #ffc107;
+            color: #333;
+        }
+        
+        .stage-badge.cancelled {
+            background: #dc3545;
+            color: white;
         }
         
         .tree-children {
@@ -1892,6 +2142,31 @@ except Exception as e:
                         <div class="form-group small">
                             <button type="button" class="btn btn-primary" onclick="searchHierarchy()">🔍 Load</button>
                         </div>
+                    </div>
+                </div>
+                
+                <div class="hierarchy-filters" id="hierarchyFilters" style="display: none;">
+                    <div class="filter-section">
+                        <span class="filter-label">📊 Filter by Stage:</span>
+                        <div class="stage-filters" id="stageFilters">
+                            <!-- Stage toggles will be populated here -->
+                        </div>
+                        <div class="filter-actions">
+                            <button class="filter-btn" onclick="toggleAllStages(true)">Show All</button>
+                            <button class="filter-btn" onclick="toggleAllStages(false)">Hide All</button>
+                        </div>
+                    </div>
+                    
+                    <div class="filter-section">
+                        <span class="filter-label">🔥 Minimum Priority:</span>
+                        <div class="priority-filter">
+                            <input type="range" id="prioritySlider" class="priority-slider" min="0" max="3" value="0" onchange="updatePriorityFilter()">
+                            <span class="priority-label" id="priorityLabel">Normal+</span>
+                        </div>
+                    </div>
+                    
+                    <div class="filter-summary" id="filterSummary">
+                        <!-- Filter summary will be shown here -->
                     </div>
                 </div>
                 
@@ -2875,6 +3150,15 @@ except Exception as e:
         
         function displayHierarchy(hierarchy) {
             const container = document.getElementById('hierarchyContainer');
+            const filtersContainer = document.getElementById('hierarchyFilters');
+            
+            // Store hierarchy globally for filtering and drag & drop
+            window.currentHierarchy = hierarchy;
+            
+            // Setup filters
+            setupHierarchyFilters(hierarchy);
+            filtersContainer.style.display = 'block';
+            
             let html = '';
             
             // Add breadcrumb for task hierarchy
@@ -2889,11 +3173,17 @@ except Exception as e:
             }
             
             // Render tree
-            html += '<div class="tree-view">';
+            html += '<div class="tree-view" id="treeView">';
             html += renderTreeNode(hierarchy.root, 0, true);
             html += '</div>';
             
             container.innerHTML = html;
+            
+            // Setup drag & drop
+            setupDragAndDrop();
+            
+            // Apply saved filters
+            applySavedFilters();
         }
         
         function renderTreeNode(node, depth, isRoot = false) {
@@ -2901,9 +3191,23 @@ except Exception as e:
             
             const hasChildren = node.children && node.children.length > 0;
             const nodeId = `node-${node.type}-${node.id}`;
+            const isDraggable = node.type === 'task' && !isRoot;
             
-            let html = '<div class="tree-node" data-node-id="' + nodeId + '">';
-            html += '<div class="tree-node-content">';
+            // Get stage and priority for filtering
+            const stage = node.stage || 'No Stage';
+            const priorityLevel = node.priority ? node.priority.level : 0;
+            
+            let html = `<div class="tree-node" data-node-id="${nodeId}" data-task-id="${node.id}" data-stage="${stage}" data-priority="${priorityLevel}" data-type="${node.type}">`;
+            
+            // Drop indicator (for drag & drop)
+            html += '<div class="drop-indicator"></div>';
+            
+            html += `<div class="tree-node-content ${isDraggable ? 'draggable' : ''}" ${isDraggable ? 'draggable="true"' : ''}>`;
+            
+            // Drag handle (only for tasks)
+            if (isDraggable) {
+                html += '<span class="drag-handle" title="Drag to move">⋮⋮</span>';
+            }
             
             // Toggle button
             if (hasChildren) {
@@ -2922,19 +3226,31 @@ except Exception as e:
             html += ' <small>(ID: ' + node.id + ')</small>';
             html += '</span>';
             
-            // Metadata
-            if (node.metadata && Object.keys(node.metadata).length > 0) {
+            // Metadata with enhanced display
+            if (node.type === 'task') {
                 html += '<div class="tree-metadata">';
                 
-                if (node.metadata.user) {
+                // Stage badge
+                if (node.stage && node.stage !== 'No Stage') {
+                    const stageClass = getStageClass(node.stage);
+                    html += `<span class="stage-badge ${stageClass}">${escapeHtml(node.stage)}</span>`;
+                }
+                
+                // Priority stars
+                if (node.priority && node.priority.level > 0) {
+                    const stars = '★'.repeat(node.priority.stars);
+                    html += `<span class="priority-stars" title="${node.priority.name}">${stars}</span>`;
+                }
+                
+                // User
+                if (node.metadata && node.metadata.user) {
                     html += '<span>👤 ' + escapeHtml(node.metadata.user) + '</span>';
                 }
-                if (node.metadata.stage) {
-                    html += '<span>📊 ' + escapeHtml(node.metadata.stage) + '</span>';
-                }
-                if (node.metadata.priority && node.metadata.priority !== '0') {
-                    html += '<span>🔥 ' + escapeHtml(node.metadata.priority) + '</span>';
-                }
+                
+                html += '</div>';
+            } else if (node.metadata && Object.keys(node.metadata).length > 0) {
+                html += '<div class="tree-metadata">';
+                
                 if (node.metadata.manager) {
                     html += '<span>👤 ' + escapeHtml(node.metadata.manager) + '</span>';
                 }
@@ -2958,6 +3274,20 @@ except Exception as e:
             
             html += '</div>';
             return html;
+        }
+        
+        function getStageClass(stage) {
+            const stageLower = stage.toLowerCase();
+            if (stageLower.includes('progress') || stageLower.includes('doing')) {
+                return 'in-progress';
+            } else if (stageLower.includes('done') || stageLower.includes('complete')) {
+                return 'done';
+            } else if (stageLower.includes('wait') || stageLower.includes('pending')) {
+                return 'waiting';
+            } else if (stageLower.includes('cancel') || stageLower.includes('reject')) {
+                return 'cancelled';
+            }
+            return '';
         }
         
         function toggleTreeNode(nodeId) {
@@ -3001,6 +3331,393 @@ except Exception as e:
                     button.textContent = '▶';
                 }
             });
+        }
+        
+        // Hierarchy Filtering System
+        function setupHierarchyFilters(hierarchy) {
+            if (!hierarchy.filter_data) return;
+            
+            const stageFilters = document.getElementById('stageFilters');
+            const prioritySlider = document.getElementById('prioritySlider');
+            
+            // Setup stage filters
+            stageFilters.innerHTML = '';
+            hierarchy.filter_data.stages.forEach(stage => {
+                const toggle = document.createElement('span');
+                toggle.className = 'stage-toggle active';
+                toggle.textContent = stage;
+                toggle.dataset.stage = stage;
+                toggle.onclick = () => toggleStageFilter(stage, toggle);
+                stageFilters.appendChild(toggle);
+            });
+            
+            // Setup priority filter
+            prioritySlider.value = 0;
+            updatePriorityLabel(0);
+            
+            updateFilterSummary();
+        }
+        
+        function toggleStageFilter(stage, toggleElement) {
+            toggleElement.classList.toggle('active');
+            applyFilters();
+            updateFilterSummary();
+            saveFilterState();
+        }
+        
+        function toggleAllStages(show) {
+            const toggles = document.querySelectorAll('.stage-toggle');
+            toggles.forEach(toggle => {
+                if (show) {
+                    toggle.classList.add('active');
+                } else {
+                    toggle.classList.remove('active');
+                }
+            });
+            applyFilters();
+            updateFilterSummary();
+            saveFilterState();
+        }
+        
+        function updatePriorityFilter() {
+            const slider = document.getElementById('prioritySlider');
+            const level = parseInt(slider.value);
+            updatePriorityLabel(level);
+            applyFilters();
+            updateFilterSummary();
+            saveFilterState();
+        }
+        
+        function updatePriorityLabel(level) {
+            const label = document.getElementById('priorityLabel');
+            const labels = ['Normal+', 'High+', 'Urgent+', 'Critical'];
+            label.textContent = labels[level] || 'Normal+';
+        }
+        
+        function applyFilters() {
+            const activeStages = Array.from(document.querySelectorAll('.stage-toggle.active')).map(t => t.dataset.stage);
+            const minPriority = parseInt(document.getElementById('prioritySlider').value);
+            
+            const allNodes = document.querySelectorAll('.tree-node[data-type="task"]');
+            
+            allNodes.forEach(node => {
+                const stage = node.dataset.stage;
+                const priority = parseInt(node.dataset.priority);
+                
+                const stageMatch = activeStages.includes(stage);
+                const priorityMatch = priority >= minPriority;
+                
+                if (stageMatch && priorityMatch) {
+                    node.classList.remove('filtered-hidden');
+                } else {
+                    node.classList.add('filtered-hidden');
+                }
+            });
+            
+            // Handle parent visibility (show parents if they have visible children)
+            updateParentVisibility();
+        }
+        
+        function updateParentVisibility() {
+            const allNodes = document.querySelectorAll('.tree-node');
+            
+            // First pass: hide all parents that have no visible children
+            allNodes.forEach(node => {
+                if (node.dataset.type === 'task') {
+                    const children = node.querySelectorAll('.tree-node[data-type="task"]:not(.filtered-hidden)');
+                    const hasVisibleChildren = children.length > 0;
+                    const isVisibleItself = !node.classList.contains('filtered-hidden');
+                    
+                    if (!isVisibleItself && !hasVisibleChildren) {
+                        // This node should remain hidden
+                    } else if (!isVisibleItself && hasVisibleChildren) {
+                        // Show this node because it has visible children
+                        node.classList.remove('filtered-hidden');
+                        node.classList.add('parent-visible');
+                    }
+                }
+            });
+        }
+        
+        function updateFilterSummary() {
+            const activeStages = Array.from(document.querySelectorAll('.stage-toggle.active')).map(t => t.textContent);
+            const minPriority = parseInt(document.getElementById('prioritySlider').value);
+            const priorityLabels = ['Normal', 'High', 'Urgent', 'Critical'];
+            
+            const summary = document.getElementById('filterSummary');
+            let text = '';
+            
+            if (activeStages.length === 0) {
+                text += 'No stages selected';
+            } else if (activeStages.length === document.querySelectorAll('.stage-toggle').length) {
+                text += 'All stages';
+            } else {
+                text += `Stages: ${activeStages.join(', ')}`;
+            }
+            
+            text += ` | Priority: ${priorityLabels[minPriority]}+`;
+            
+            summary.textContent = text;
+        }
+        
+        function saveFilterState() {
+            if (!window.currentHierarchy) return;
+            
+            const hierarchyId = window.currentHierarchy.root.id;
+            const hierarchyType = window.currentHierarchy.type;
+            
+            const state = {
+                stages: Array.from(document.querySelectorAll('.stage-toggle.active')).map(t => t.dataset.stage),
+                priority: parseInt(document.getElementById('prioritySlider').value)
+            };
+            
+            localStorage.setItem(`hierarchy_filters_${hierarchyType}_${hierarchyId}`, JSON.stringify(state));
+        }
+        
+        function applySavedFilters() {
+            if (!window.currentHierarchy) return;
+            
+            const hierarchyId = window.currentHierarchy.root.id;
+            const hierarchyType = window.currentHierarchy.type;
+            
+            const saved = localStorage.getItem(`hierarchy_filters_${hierarchyType}_${hierarchyId}`);
+            if (!saved) return;
+            
+            try {
+                const state = JSON.parse(saved);
+                
+                // Apply stage filters
+                document.querySelectorAll('.stage-toggle').forEach(toggle => {
+                    if (state.stages.includes(toggle.dataset.stage)) {
+                        toggle.classList.add('active');
+                    } else {
+                        toggle.classList.remove('active');
+                    }
+                });
+                
+                // Apply priority filter
+                document.getElementById('prioritySlider').value = state.priority;
+                updatePriorityLabel(state.priority);
+                
+                // Apply filters
+                applyFilters();
+                updateFilterSummary();
+            } catch (e) {
+                console.warn('Failed to load saved filter state:', e);
+            }
+        }
+        
+        // Drag & Drop System
+        let draggedElement = null;
+        let draggedTaskId = null;
+        let lastMoveOperation = null;
+        
+        function setupDragAndDrop() {
+            const draggableElements = document.querySelectorAll('.tree-node-content.draggable');
+            const dropTargets = document.querySelectorAll('.tree-node');
+            
+            // Setup drag events
+            draggableElements.forEach(element => {
+                element.addEventListener('dragstart', handleDragStart);
+                element.addEventListener('dragend', handleDragEnd);
+            });
+            
+            // Setup drop events
+            dropTargets.forEach(target => {
+                target.addEventListener('dragover', handleDragOver);
+                target.addEventListener('dragenter', handleDragEnter);
+                target.addEventListener('dragleave', handleDragLeave);
+                target.addEventListener('drop', handleDrop);
+            });
+        }
+        
+        function handleDragStart(e) {
+            draggedElement = e.target.closest('.tree-node');
+            draggedTaskId = draggedElement.dataset.taskId;
+            
+            draggedElement.classList.add('dragging');
+            
+            // Set drag data
+            e.dataTransfer.effectAllowed = 'move';
+            e.dataTransfer.setData('text/plain', draggedTaskId);
+            
+            console.log('Drag started:', draggedTaskId);
+        }
+        
+        function handleDragEnd(e) {
+            if (draggedElement) {
+                draggedElement.classList.remove('dragging');
+            }
+            
+            // Clean up all drag-over classes
+            document.querySelectorAll('.tree-node.drag-over').forEach(node => {
+                node.classList.remove('drag-over');
+            });
+            
+            draggedElement = null;
+            draggedTaskId = null;
+        }
+        
+        function handleDragOver(e) {
+            e.preventDefault();
+            e.dataTransfer.dropEffect = 'move';
+        }
+        
+        function handleDragEnter(e) {
+            e.preventDefault();
+            const targetNode = e.target.closest('.tree-node');
+            
+            if (targetNode && targetNode !== draggedElement && isValidDropTarget(targetNode)) {
+                targetNode.classList.add('drag-over');
+            }
+        }
+        
+        function handleDragLeave(e) {
+            const targetNode = e.target.closest('.tree-node');
+            if (targetNode) {
+                targetNode.classList.remove('drag-over');
+            }
+        }
+        
+        function handleDrop(e) {
+            e.preventDefault();
+            const targetNode = e.target.closest('.tree-node');
+            
+            if (!targetNode || !draggedElement || targetNode === draggedElement) {
+                return;
+            }
+            
+            if (!isValidDropTarget(targetNode)) {
+                alert('Invalid drop target. Cannot create circular dependency.');
+                return;
+            }
+            
+            const targetTaskId = targetNode.dataset.taskId;
+            const targetType = targetNode.dataset.type;
+            
+            // Determine new parent ID
+            let newParentId;
+            if (targetType === 'project') {
+                newParentId = 'root'; // Special case for promoting to main task
+            } else {
+                newParentId = targetTaskId;
+            }
+            
+            // Show confirmation
+            const draggedTaskName = draggedElement.querySelector('.tree-label a').textContent;
+            const targetName = targetNode.querySelector('.tree-label a').textContent;
+            
+            const message = targetType === 'project' 
+                ? `Move "${draggedTaskName}" to become a main task in project "${targetName}"?`
+                : `Move "${draggedTaskName}" to become a subtask of "${targetName}"?`;
+            
+            if (confirm(message)) {
+                performTaskMove(draggedTaskId, newParentId, targetTaskId);
+            }
+            
+            // Clean up
+            targetNode.classList.remove('drag-over');
+        }
+        
+        function isValidDropTarget(targetNode) {
+            if (!targetNode || !draggedElement) return false;
+            
+            // Can't drop on itself
+            if (targetNode === draggedElement) return false;
+            
+            // Can't drop on a descendant (would create circular dependency)
+            return !isDescendant(targetNode, draggedElement);
+        }
+        
+        function isDescendant(potentialDescendant, ancestor) {
+            let current = potentialDescendant.parentElement;
+            
+            while (current) {
+                if (current === ancestor) return true;
+                current = current.parentElement;
+            }
+            
+            return false;
+        }
+        
+        function performTaskMove(taskId, newParentId, targetTaskId) {
+            // Show loading state
+            const loadingMessage = document.createElement('div');
+            loadingMessage.className = 'loading';
+            loadingMessage.textContent = 'Moving task...';
+            document.getElementById('hierarchyContainer').appendChild(loadingMessage);
+            
+            // Prepare API call
+            const params = new URLSearchParams({
+                task_id: taskId,
+                new_parent_id: newParentId
+            });
+            
+            // Add project ID if moving to project root
+            if (newParentId === 'root' && window.currentHierarchy.type === 'project') {
+                params.append('project_id', window.currentHierarchy.root.id);
+            }
+            
+            fetch('/api/move-task?' + params.toString())
+                .then(response => response.json())
+                .then(data => {
+                    loadingMessage.remove();
+                    
+                    if (data.success) {
+                        // Store for undo
+                        lastMoveOperation = {
+                            taskId: taskId,
+                            oldParentId: draggedElement.closest('.tree-node[data-type="task"]')?.dataset.taskId || 'root',
+                            newParentId: newParentId,
+                            timestamp: Date.now()
+                        };
+                        
+                        // Show success message
+                        showMoveSuccess(data.message);
+                        
+                        // Refresh hierarchy
+                        refreshCurrentHierarchy();
+                    } else {
+                        alert('Move failed: ' + data.error);
+                    }
+                })
+                .catch(error => {
+                    loadingMessage.remove();
+                    console.error('Move error:', error);
+                    alert('Move failed: ' + error.message);
+                });
+        }
+        
+        function showMoveSuccess(message) {
+            const notification = document.createElement('div');
+            notification.style.cssText = `
+                position: fixed;
+                top: 20px;
+                right: 20px;
+                background: var(--success-color);
+                color: white;
+                padding: 10px 15px;
+                border-radius: 5px;
+                z-index: 1000;
+                box-shadow: 0 2px 10px rgba(0,0,0,0.2);
+            `;
+            notification.textContent = '✅ ' + message;
+            
+            document.body.appendChild(notification);
+            
+            setTimeout(() => {
+                notification.remove();
+            }, 3000);
+        }
+        
+        function refreshCurrentHierarchy() {
+            if (!window.currentHierarchy) return;
+            
+            const hierarchyType = window.currentHierarchy.type;
+            const hierarchyId = window.currentHierarchy.root.id;
+            
+            // Reload the hierarchy
+            loadHierarchy(hierarchyType, hierarchyId);
         }
         
         // Initialize
