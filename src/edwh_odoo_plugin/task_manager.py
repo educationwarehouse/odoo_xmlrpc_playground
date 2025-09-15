@@ -36,6 +36,8 @@ class TaskManager(OdooBase):
         
         super().__init__(verbose=verbose)
         self.searcher = OdooTextSearch(verbose=(verbosity_level > 0 if verbosity_level is not None else verbose))
+        # Cache for task names to avoid repeated RPCs during hierarchy printing
+        self._task_name_cache = {}
 
     def move_subtask(self, subtask_id, new_parent_id, target_project_id=None):
         """
@@ -672,90 +674,263 @@ class TaskManager(OdooBase):
                     }
                 }
 
-            # Build indices in O(N)
-            t_index_start = time.time()
-            def get_id(value):
-                # Handles both many2one-like objects and raw ints
+            # If verbosity >= 1, switch to a rich single-batch read to avoid per-node RPCs
+            rich_path = self.verbosity_level >= 1
+
+            if not rich_path:
+                # Original lightweight index build using record objects
+                t_index_start = time.time()
+                def get_id(value):
+                    # Handles both many2one-like objects and raw ints
+                    try:
+                        if hasattr(value, 'id'):
+                            return value.id
+                        return int(value) if value else None
+                    except Exception:
+                        return None
+
+                by_id = {}
+                children_by_parent = {}
+
+                for t in all_tasks:
+                    by_id[t.id] = t
+                    pid = get_id(getattr(t, 'parent_id', None))
+                    children_by_parent.setdefault(pid, []).append(t)
+                t_index_ms = int((time.time() - t_index_start) * 1000)
+
+                # Determine main tasks (no parent)
+                main_tasks = children_by_parent.get(None, []) + children_by_parent.get(False, [])
+                # Deduplicate in case both None and False keys contain same tasks
+                seen_main = set()
+                main_tasks = [x for x in main_tasks if not (x.id in seen_main or seen_main.add(x.id))]
+
+                if self.verbosity_level >= 2:
+                    print(f"🔍 Found {len(main_tasks)} main tasks (without parents)")
+                    print(f"⏱ Index build: {t_index_ms} ms")
+                elif self.verbosity_level == 0:
+                    print("\r🔍 Building hierarchy...", end="", flush=True)
+
+                # Depth-limited recursive assembly using in-memory index
+                def build_node(task, depth):
+                    # Performance: build a lightweight node during assembly to avoid
+                    # triggering relational dereferencing and extra RPCs. Full details
+                    # (user, stage, etc.) can be resolved on-demand at print time.
+                    node = {
+                        'id': task.id,
+                        'name': getattr(task, 'name', f'Task {task.id}'),
+                    }
+                    if depth >= depth_limit:
+                        node['children'] = []
+                        return node
+                    child_nodes = []
+                    for c in children_by_parent.get(task.id, []):
+                        child_nodes.append(build_node(c, depth + 1))
+                    node['children'] = child_nodes
+                    return node
+
+                t_assembly_start = time.time()
+                project_hierarchy = {
+                    'project': self._project_to_dict(project),
+                    'main_tasks': [],
+                    'total_tasks': len(all_tasks),
+                    'main_task_count': len(main_tasks),
+                }
+
+                for i, main_task in enumerate(main_tasks):
+                    if self.verbosity_level == 0:
+                        print(f"\r🔍 Processing task {i+1}/{len(main_tasks)}...", end="", flush=True)
+                    project_hierarchy['main_tasks'].append(build_node(main_task, 1))
+
+                t_assembly_ms = int((time.time() - t_assembly_start) * 1000)
+                t_total_ms = int((time.time() - t_total_start) * 1000)
+
+                project_hierarchy['timings'] = {
+                    'project_fetch_ms': t_proj_ms,
+                    'tasks_fetch_ms': t_tasks_ms,
+                    'index_build_ms': t_index_ms,
+                    'assembly_ms': t_assembly_ms,
+                    'total_ms': t_total_ms,
+                }
+
+                if self.verbosity_level >= 2:
+                    print(f"⏱ Assembly: {t_assembly_ms} ms, Total: {t_total_ms} ms")
+
+                if self.verbosity_level == 0:
+                    print("\r" + " " * 50 + "\r", end="")  # Clear progress line
+
+                return {
+                    'success': True,
+                    'hierarchy': project_hierarchy,
+                }
+            else:
+                # Rich path: single bulk read of all needed fields, then pure in-memory assembly
+                if self.verbosity_level >= 2:
+                    print("🔍 Fetching rich task fields in bulk for verbose output...")
+                t_index_start = time.time()
+
+                # Gather task IDs from already fetched records
+                all_ids = [t.id for t in all_tasks]
+                # Fields to request in one go
+                fields = [
+                    'id', 'name', 'parent_id',
+                    'user_id', 'stage_id', 'priority', 'state', 'kanban_state',
+                    'date_deadline', 'create_date', 'write_date',
+                    'depend_on_ids', 'blocking_task_ids', 'predecessor_ids', 'successor_ids',
+                    'dependency_ids', 'blocked_by_ids', 'blocking_ids'
+                ]
                 try:
-                    if hasattr(value, 'id'):
-                        return value.id
-                    return int(value) if value else None
-                except Exception:
+                    task_dicts = self.tasks.read(all_ids, fields)
+                except Exception as e:
+                    # Fallback: if read with (ids, fields) fails due to signature, try keyword arg
+                    try:
+                        task_dicts = self.tasks.read(all_ids, fields=fields)
+                    except Exception as e2:
+                        if self.verbose:
+                            print(f"⚠️ Bulk read failed, falling back to lightweight mode: {e2}")
+                        # Fall back to the lightweight path by re-running that branch
+                        rich_path = False
+                        # Recursively call but with same parameters; ensure no infinite loop
+                        return self.show_project_hierarchy(project_id, max_depth)
+
+                # Helper to normalize many2one to (id, name)
+                def m2o_id(val):
+                    try:
+                        if val is None or val is False:
+                            return None
+                        if isinstance(val, (list, tuple)) and len(val) >= 1:
+                            # Odoo typical: [id, name]
+                            return val[0] if isinstance(val[0], int) else None
+                        if isinstance(val, dict):
+                            return val.get('id')
+                        if isinstance(val, int):
+                            return val
+                    except Exception:
+                        return None
                     return None
 
-            by_id = {}
-            children_by_parent = {}
+                # Index by ID and parent
+                by_id = {d['id']: d for d in task_dicts}
+                children_by_parent = {}
+                for d in task_dicts:
+                    pid = m2o_id(d.get('parent_id'))
+                    children_by_parent.setdefault(pid, []).append(d)
 
-            for t in all_tasks:
-                by_id[t.id] = t
-                pid = get_id(getattr(t, 'parent_id', None))
-                children_by_parent.setdefault(pid, []).append(t)
-            t_index_ms = int((time.time() - t_index_start) * 1000)
+                # Prefill task name cache for fast dependency name lookups
+                try:
+                    for tid, td in by_id.items():
+                        name = td.get('name') or f'Task {tid}'
+                        self._task_name_cache[tid] = name
+                except Exception:
+                    pass
 
-            # Determine main tasks (no parent)
-            main_tasks = children_by_parent.get(None, []) + children_by_parent.get(False, [])
-            # Deduplicate in case both None and False keys contain same tasks
-            seen_main = set()
-            main_tasks = [x for x in main_tasks if not (x.id in seen_main or seen_main.add(x.id))]
+                # Build dependency relations once per task
+                def aggregate_rel(d):
+                    def ids_from(key):
+                        val = d.get(key)
+                        if not val:
+                            return []
+                        # Many2many might be list of ints or list of [id, name]
+                        out = []
+                        try:
+                            for item in val:
+                                if isinstance(item, int):
+                                    out.append(item)
+                                elif isinstance(item, (list, tuple)) and item and isinstance(item[0], int):
+                                    out.append(item[0])
+                                elif isinstance(item, dict) and 'id' in item:
+                                    out.append(item['id'])
+                        except Exception:
+                            pass
+                        return out
+                    blocked_by = set(ids_from('depend_on_ids') + ids_from('predecessor_ids') + ids_from('blocked_by_ids') + ids_from('dependency_ids'))
+                    blocking = set(ids_from('blocking_task_ids') + ids_from('successor_ids') + ids_from('blocking_ids'))
+                    # Remove self references just in case
+                    tid = d.get('id')
+                    blocked_by.discard(tid)
+                    blocking.discard(tid)
+                    return sorted(blocked_by), sorted(blocking)
 
-            if self.verbosity_level >= 2:
-                print(f"🔍 Found {len(main_tasks)} main tasks (without parents)")
-                print(f"⏱ Index build: {t_index_ms} ms")
-            elif self.verbosity_level == 0:
-                print("\r🔍 Building hierarchy...", end="", flush=True)
+                t_index_ms = int((time.time() - t_index_start) * 1000)
 
-            # Depth-limited recursive assembly using in-memory index
-            def build_node(task, depth):
-                # Performance: build a lightweight node during assembly to avoid
-                # triggering relational dereferencing and extra RPCs. Full details
-                # (user, stage, etc.) can be resolved on-demand at print time.
-                node = {
-                    'id': task.id,
-                    'name': getattr(task, 'name', f'Task {task.id}'),
-                }
-                if depth >= depth_limit:
-                    node['children'] = []
+                # Determine main tasks (no parent)
+                main_tasks = children_by_parent.get(None, []) + children_by_parent.get(False, [])
+                # No need to deduplicate by object equality here; IDs are unique
+                seen_main = set()
+                main_tasks = [x for x in main_tasks if not (x['id'] in seen_main or seen_main.add(x['id']))]
+
+                if self.verbosity_level >= 2:
+                    print(f"🔍 Found {len(main_tasks)} main tasks (without parents)")
+                    print(f"⏱ Index build: {t_index_ms} ms")
+
+                # Node builder for dicts
+                def build_node_dict(d, depth):
+                    uid = m2o_id(d.get('user_id'))
+                    sid = m2o_id(d.get('stage_id'))
+                    blocked_by, blocking = aggregate_rel(d)
+                    node = {
+                        'id': d['id'],
+                        'name': d.get('name') or f"Task {d['id']}",
+                        'user_id': uid,
+                        'user': None,  # name may be absent, printer tolerates None
+                        'stage_id': sid,
+                        'stage_name': None,
+                        'priority': str(d.get('priority', '0')),
+                        'state': d.get('state') or 'draft',
+                        'kanban_state': d.get('kanban_state') or 'normal',
+                        'deadline': d.get('date_deadline') or None,
+                        'create_date': str(d.get('create_date') or ''),
+                        'write_date': str(d.get('write_date') or ''),
+                        'blocked_by': blocked_by,
+                        'blocking': blocking,
+                    }
+                    # Try to capture many2one display names if present in value forms
+                    try:
+                        # If user_id is [id, name]
+                        uval = d.get('user_id')
+                        if isinstance(uval, (list, tuple)) and len(uval) >= 2:
+                            node['user'] = uval[1]
+                        # If stage_id is [id, name]
+                        sval = d.get('stage_id')
+                        if isinstance(sval, (list, tuple)) and len(sval) >= 2:
+                            node['stage_name'] = sval[1]
+                    except Exception:
+                        pass
+
+                    if depth >= depth_limit:
+                        node['children'] = []
+                        return node
+                    node['children'] = [build_node_dict(c, depth + 1) for c in children_by_parent.get(d['id'], [])]
                     return node
-                child_nodes = []
-                for c in children_by_parent.get(task.id, []):
-                    child_nodes.append(build_node(c, depth + 1))
-                node['children'] = child_nodes
-                return node
 
-            t_assembly_start = time.time()
-            project_hierarchy = {
-                'project': self._project_to_dict(project),
-                'main_tasks': [],
-                'total_tasks': len(all_tasks),
-                'main_task_count': len(main_tasks),
-            }
+                t_assembly_start = time.time()
+                project_hierarchy = {
+                    'project': self._project_to_dict(project),
+                    'main_tasks': [],
+                    'total_tasks': len(task_dicts),
+                    'main_task_count': len(main_tasks),
+                }
 
-            for i, main_task in enumerate(main_tasks):
-                if self.verbosity_level == 0:
-                    print(f"\r🔍 Processing task {i+1}/{len(main_tasks)}...", end="", flush=True)
-                project_hierarchy['main_tasks'].append(build_node(main_task, 1))
+                for i, main_task in enumerate(main_tasks):
+                    project_hierarchy['main_tasks'].append(build_node_dict(main_task, 1))
 
-            t_assembly_ms = int((time.time() - t_assembly_start) * 1000)
-            t_total_ms = int((time.time() - t_total_start) * 1000)
+                t_assembly_ms = int((time.time() - t_assembly_start) * 1000)
+                t_total_ms = int((time.time() - t_total_start) * 1000)
 
-            project_hierarchy['timings'] = {
-                'project_fetch_ms': t_proj_ms,
-                'tasks_fetch_ms': t_tasks_ms,
-                'index_build_ms': t_index_ms,
-                'assembly_ms': t_assembly_ms,
-                'total_ms': t_total_ms,
-            }
+                project_hierarchy['timings'] = {
+                    'project_fetch_ms': t_proj_ms,
+                    'tasks_fetch_ms': t_tasks_ms,
+                    'index_build_ms': t_index_ms,
+                    'assembly_ms': t_assembly_ms,
+                    'total_ms': t_total_ms,
+                }
 
-            if self.verbosity_level >= 2:
-                print(f"⏱ Assembly: {t_assembly_ms} ms, Total: {t_total_ms} ms")
+                if self.verbosity_level >= 2:
+                    print(f"⏱ Assembly: {t_assembly_ms} ms, Total: {t_total_ms} ms")
 
-            if self.verbosity_level == 0:
-                print("\r" + " " * 50 + "\r", end="")  # Clear progress line
-
-            return {
-                'success': True,
-                'hierarchy': project_hierarchy,
-            }
+                return {
+                    'success': True,
+                    'hierarchy': project_hierarchy,
+                }
 
         except Exception as e:
             if not self.verbose:
@@ -998,8 +1173,15 @@ class TaskManager(OdooBase):
     def _print_task_details(self, task, indent):
         """Print detailed task information with proper indentation based on verbosity level"""
         
-        # Get blocking info first since it's important at all levels
-        blocking_info = self._get_blocking_info(task['id'])
+        # Get blocking info lazily: skip at default verbosity (0) to speed up printing
+        # For verbosity >=1, prefer precomputed relations on the task node; fall back to RPC if missing
+        blocking_info = {'blocked_by': [], 'blocking': []}
+        if self.verbosity_level >= 1:
+            if 'blocked_by' in task or 'blocking' in task:
+                blocking_info['blocked_by'] = task.get('blocked_by', []) or []
+                blocking_info['blocking'] = task.get('blocking', []) or []
+            else:
+                blocking_info = self._get_blocking_info(task['id'])
         
         # Level 0 (default): Essential info with icons on one line
         if self.verbosity_level == 0:
@@ -1194,11 +1376,25 @@ class TaskManager(OdooBase):
             return f"☆☆☆ ({priority_value})"
 
     def _get_task_name(self, task_id):
-        """Get task name by ID for blocking relationships"""
+        """Get task name by ID for blocking relationships with simple cache"""
         try:
+            # Use cache if available
+            cache = getattr(self, '_task_name_cache', None)
+            if isinstance(cache, dict):
+                cached = cache.get(task_id)
+                if cached:
+                    return cached
+            
             task_records = self.tasks.search_records([('id', '=', task_id)])
             if task_records:
-                return getattr(task_records[0], 'name', f'Task {task_id}')
+                name = getattr(task_records[0], 'name', f'Task {task_id}')
+                # Store in cache
+                try:
+                    if isinstance(cache, dict):
+                        cache[task_id] = name
+                except Exception:
+                    pass
+                return name
             else:
                 return f'Task {task_id}'
         except Exception:
