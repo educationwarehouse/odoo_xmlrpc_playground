@@ -3828,7 +3828,7 @@ except Exception as e:
             const stageFilters = document.getElementById('stageFilters');
             const prioritySlider = document.getElementById('prioritySlider');
             
-            // Setup stage filters
+            // Setup stage filters - make sure all stages are initially active
             stageFilters.innerHTML = '';
             hierarchy.filter_data.stages.forEach(stage => {
                 const toggle = document.createElement('span');
@@ -3844,6 +3844,9 @@ except Exception as e:
             updatePriorityLabel(0);
             
             updateFilterSummary();
+            
+            // Apply filters immediately to ensure all stages are visible initially
+            applyFilters();
         }
         
         function toggleStageFilter(stage, toggleElement) {
@@ -3883,17 +3886,23 @@ except Exception as e:
         }
         
         function applyFilters() {
-            const activeStages = Array.from(document.querySelectorAll('.stage-toggle.active')).map(t => t.dataset.stage);
-            const minPriority = parseInt(document.getElementById('prioritySlider').value);
+            const stageToggles = document.querySelectorAll('.stage-toggle.active');
+            const activeStages = Array.from(stageToggles).map(t => t.dataset.stage);
+            const minPriority = parseInt(document.getElementById('prioritySlider').value || 0);
+            
+            console.log('Applying filters - Active stages:', activeStages, 'Min priority:', minPriority);
             
             const allNodes = document.querySelectorAll('.tree-node[data-type="task"]');
+            console.log('Found', allNodes.length, 'task nodes to filter');
             
             allNodes.forEach(node => {
                 const stage = node.dataset.stage;
-                const priority = parseInt(node.dataset.priority);
+                const priority = parseInt(node.dataset.priority || 0);
                 
-                const stageMatch = activeStages.includes(stage);
+                const stageMatch = activeStages.length === 0 || activeStages.includes(stage);
                 const priorityMatch = priority >= minPriority;
+                
+                console.log(`Task ${node.dataset.taskId}: stage="${stage}" (match: ${stageMatch}), priority=${priority} (match: ${priorityMatch})`);
                 
                 if (stageMatch && priorityMatch) {
                     node.classList.remove('filtered-hidden');
@@ -3904,6 +3913,8 @@ except Exception as e:
             
             // Handle parent visibility (show parents if they have visible children)
             updateParentVisibility();
+            
+            console.log('Filter application complete');
         }
         
         function updateParentVisibility() {
@@ -3963,16 +3974,29 @@ except Exception as e:
         }
         
         function applySavedFilters() {
-            if (!window.currentHierarchy) return;
+            if (!window.currentHierarchy) {
+                console.log('No current hierarchy, skipping saved filters');
+                return;
+            }
             
             const hierarchyId = window.currentHierarchy.root.id;
             const hierarchyType = window.currentHierarchy.type;
             
             const saved = localStorage.getItem(`hierarchy_filters_${hierarchyType}_${hierarchyId}`);
-            if (!saved) return;
+            if (!saved) {
+                console.log('No saved filters found, using defaults (all stages active)');
+                // Ensure all stages are active by default
+                document.querySelectorAll('.stage-toggle').forEach(toggle => {
+                    toggle.classList.add('active');
+                });
+                applyFilters();
+                updateFilterSummary();
+                return;
+            }
             
             try {
                 const state = JSON.parse(saved);
+                console.log('Applying saved filter state:', state);
                 
                 // Apply stage filters
                 document.querySelectorAll('.stage-toggle').forEach(toggle => {
@@ -3984,14 +4008,20 @@ except Exception as e:
                 });
                 
                 // Apply priority filter
-                document.getElementById('prioritySlider').value = state.priority;
-                updatePriorityLabel(state.priority);
+                document.getElementById('prioritySlider').value = state.priority || 0;
+                updatePriorityLabel(state.priority || 0);
                 
                 // Apply filters
                 applyFilters();
                 updateFilterSummary();
             } catch (e) {
                 console.warn('Failed to load saved filter state:', e);
+                // Fallback to showing all stages
+                document.querySelectorAll('.stage-toggle').forEach(toggle => {
+                    toggle.classList.add('active');
+                });
+                applyFilters();
+                updateFilterSummary();
             }
         }
         
