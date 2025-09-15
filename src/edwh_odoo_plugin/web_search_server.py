@@ -810,7 +810,7 @@ except Exception as e:
             }, 500)
 
     def handle_move_task_api(self, query_string):
-        """Handle task move API requests for drag & drop"""
+        """Handle task move API requests for drag & drop with partial tree updates"""
         try:
             params = parse_qs(query_string)
             
@@ -818,6 +818,8 @@ except Exception as e:
             task_id = params.get('task_id', [''])[0]
             new_parent_id = params.get('new_parent_id', [''])[0]
             project_id = params.get('project_id', [''])[0] or None
+            partial_update = params.get('partial', ['true'])[0].lower() == 'true'
+            old_parent_id = params.get('old_parent_id', [''])[0] or None
             
             # Validate task_id
             if not task_id or task_id in ['null', 'undefined', '']:
@@ -829,7 +831,7 @@ except Exception as e:
                 self.send_json_response({'error': 'Valid New parent ID is required'}, 400)
                 return
 
-            print(f"🔄 Move task request: {task_id} -> {new_parent_id}")
+            print(f"🔄 Move task request: {task_id} -> {new_parent_id} (partial: {partial_update})")
 
             # Validate that task_id can be converted to int
             try:
@@ -855,6 +857,11 @@ except Exception as e:
                 except ImportError:
                     from task_manager import TaskManager
 
+            # Get pre-move state for partial updates
+            pre_move_state = None
+            if partial_update:
+                pre_move_state = self._capture_move_state(task_id, old_parent_id, new_parent_id)
+
             # Perform the move
             manager = TaskManager(verbose=False)
             
@@ -865,11 +872,28 @@ except Exception as e:
                 result = manager.move_subtask(int(task_id), int(new_parent_id), project_id)
             
             if result['success']:
-                self.send_json_response({
-                    'success': True,
-                    'message': 'Task moved successfully',
-                    'details': result
-                })
+                if partial_update:
+                    # Generate partial update response
+                    update_data = self._generate_partial_updates(
+                        task_id, old_parent_id, new_parent_id, pre_move_state, manager
+                    )
+                    
+                    self.send_json_response({
+                        'success': True,
+                        'message': 'Task moved successfully',
+                        'partial_update': True,
+                        'updates': update_data,
+                        'operation_id': str(uuid.uuid4()),
+                        'details': result
+                    })
+                else:
+                    # Legacy full response
+                    self.send_json_response({
+                        'success': True,
+                        'message': 'Task moved successfully',
+                        'partial_update': False,
+                        'details': result
+                    })
             else:
                 self.send_json_response({
                     'success': False,
@@ -888,6 +912,198 @@ except Exception as e:
                 'error': error_msg,
                 'traceback': traceback_msg
             }, 500)
+
+    def _capture_move_state(self, task_id, old_parent_id, new_parent_id):
+        """Capture state before move operation for partial updates"""
+        try:
+            # Import TaskManager
+            try:
+                from .task_manager import TaskManager
+            except ImportError:
+                try:
+                    from edwh_odoo_plugin.task_manager import TaskManager
+                except ImportError:
+                    from task_manager import TaskManager
+            
+            manager = TaskManager(verbose=False)
+            
+            # Get task details
+            task_data = manager._get_task_name(int(task_id))
+            
+            state = {
+                'task_id': task_id,
+                'old_parent_id': old_parent_id,
+                'new_parent_id': new_parent_id,
+                'task_name': task_data if isinstance(task_data, str) else f"Task {task_id}",
+                'timestamp': time.time()
+            }
+            
+            return state
+            
+        except Exception as e:
+            print(f"⚠️ Failed to capture move state: {e}")
+            return {
+                'task_id': task_id,
+                'old_parent_id': old_parent_id,
+                'new_parent_id': new_parent_id,
+                'task_name': f"Task {task_id}",
+                'timestamp': time.time()
+            }
+
+    def _generate_partial_updates(self, task_id, old_parent_id, new_parent_id, pre_move_state, manager):
+        """Generate partial update instructions for the client"""
+        try:
+            updates = {
+                'removed_from': None,
+                'added_to': None,
+                'updated_nodes': [],
+                'operation_type': 'move'
+            }
+            
+            # Handle removal from old parent
+            if old_parent_id and old_parent_id != 'root':
+                updates['removed_from'] = {
+                    'parent_id': old_parent_id,
+                    'task_id': task_id
+                }
+                
+                # Update old parent metadata (child count)
+                updates['updated_nodes'].append({
+                    'node_id': f"node-task-{old_parent_id}",
+                    'updates': {
+                        'child_count_change': -1
+                    }
+                })
+            
+            # Handle addition to new parent
+            if new_parent_id == 'root':
+                # Promoted to main task
+                updates['added_to'] = {
+                    'parent_type': 'project',
+                    'parent_id': 'root',
+                    'task_id': task_id,
+                    'operation': 'promote'
+                }
+            else:
+                # Moved to new parent task
+                updates['added_to'] = {
+                    'parent_type': 'task',
+                    'parent_id': new_parent_id,
+                    'task_id': task_id,
+                    'operation': 'move'
+                }
+                
+                # Update new parent metadata (child count)
+                updates['updated_nodes'].append({
+                    'node_id': f"node-task-{new_parent_id}",
+                    'updates': {
+                        'child_count_change': 1
+                    }
+                })
+            
+            # Get updated task data for the moved task
+            try:
+                # Get fresh task data after move
+                task_hierarchy = manager.show_hierarchy(int(task_id))
+                if task_hierarchy['success']:
+                    task_data = task_hierarchy['hierarchy']['main_task']
+                    task_node = self._convert_single_task_node(task_data)
+                    updates['moved_task_data'] = task_node
+            except Exception as e:
+                print(f"⚠️ Failed to get updated task data: {e}")
+            
+            return updates
+            
+        except Exception as e:
+            print(f"❌ Failed to generate partial updates: {e}")
+            return {
+                'removed_from': {'parent_id': old_parent_id, 'task_id': task_id} if old_parent_id else None,
+                'added_to': {'parent_id': new_parent_id, 'task_id': task_id},
+                'updated_nodes': [],
+                'operation_type': 'move',
+                'error': str(e)
+            }
+
+    def _convert_single_task_node(self, task_data):
+        """Convert a single task to web format for partial updates"""
+        if not task_data:
+            return None
+            
+        def clean_text(text):
+            if not text:
+                return ""
+            import re
+            ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
+            return ansi_escape.sub('', str(text))
+
+        def normalize_priority(priority_value):
+            try:
+                priority = int(priority_value) if priority_value else 0
+                if priority == 0:
+                    return {'level': 0, 'name': 'Normal', 'stars': 1}
+                elif priority == 1:
+                    return {'level': 1, 'name': 'High', 'stars': 2}
+                elif priority == 2:
+                    return {'level': 2, 'name': 'Urgent', 'stars': 3}
+                elif priority >= 3:
+                    return {'level': 3, 'name': 'Critical', 'stars': 4}
+                else:
+                    return {'level': 0, 'name': 'Normal', 'stars': 1}
+            except (ValueError, TypeError):
+                return {'level': 0, 'name': 'Normal', 'stars': 1}
+
+        def clean_stage_name(stage_name):
+            if not stage_name or stage_name == 'No Stage':
+                return 'No Stage'
+            import re
+            cleaned = re.sub(r'^\d+_', '', str(stage_name))
+            cleaned = cleaned.replace('_', ' ').title()
+            stage_mapping = {
+                'Inbox': 'Inbox', 'In Progress': 'In Progress', 'Done': 'Done',
+                'Cancelled': 'Cancelled', 'Waiting': 'Waiting', 'New': 'New', 'Draft': 'Draft'
+            }
+            return stage_mapping.get(cleaned, cleaned)
+
+        # Normalize priority and stage
+        priority_info = normalize_priority(task_data.get('priority', '0'))
+        raw_stage = task_data.get('stage_name', 'No Stage')
+        cleaned_stage = clean_stage_name(raw_stage)
+        
+        node = {
+            'id': task_data.get('id'),
+            'name': clean_text(task_data.get('name', 'Untitled')),
+            'type': 'task',
+            'url': f"https://education-warehouse.odoo.com/web#id={task_data.get('id')}&model=project.task&view_type=form",
+            'stage': cleaned_stage,
+            'priority': priority_info,
+            'metadata': {}
+        }
+        
+        # Add metadata
+        if task_data.get('user'):
+            node['metadata']['user'] = clean_text(task_data['user'])
+        if task_data.get('stage_name'):
+            node['metadata']['stage'] = cleaned_stage
+        if task_data.get('priority'):
+            node['metadata']['priority'] = clean_text(task_data['priority'])
+        if task_data.get('state'):
+            node['metadata']['state'] = clean_text(task_data['state'])
+        if task_data.get('deadline'):
+            node['metadata']['deadline'] = clean_text(task_data['deadline'])
+        if task_data.get('project_name'):
+            node['metadata']['project'] = clean_text(task_data['project_name'])
+        if task_data.get('description'):
+            node['metadata']['description'] = clean_text(task_data['description'])[:200] + ('...' if len(clean_text(task_data['description'])) > 200 else '')
+        
+        # Convert children recursively
+        if task_data.get('children'):
+            node['children'] = []
+            for child in task_data['children']:
+                child_node = self._convert_single_task_node(child)
+                if child_node:
+                    node['children'].append(child_node)
+        
+        return node
 
     def convert_hierarchy_for_web(self, hierarchy, hierarchy_type):
         """Convert terminal-friendly hierarchy to web-friendly format"""
@@ -3654,6 +3870,13 @@ except Exception as e:
             
             // Apply saved filters
             applySavedFilters();
+            
+            // Restore state if this is a refresh
+            if (HierarchyState.expandedNodes.size > 0) {
+                setTimeout(() => {
+                    HierarchyState.restoreState();
+                }, 100);
+            }
         }
         
         function renderTreeNode(node, depth, isRoot = false) {
@@ -4307,6 +4530,82 @@ except Exception as e:
             return false;
         }
         
+        // State Management for Partial Updates
+        const HierarchyState = {
+            expandedNodes: new Set(),
+            scrollPosition: 0,
+            activeFilters: {},
+            
+            captureState() {
+                // Capture expanded nodes
+                this.expandedNodes.clear();
+                document.querySelectorAll('.tree-children:not(.collapsed)').forEach(child => {
+                    const nodeId = child.id.replace('children-', '');
+                    this.expandedNodes.add(nodeId);
+                });
+                
+                // Capture scroll position
+                const container = document.getElementById('hierarchyContainer');
+                this.scrollPosition = container ? container.scrollTop : 0;
+                
+                // Capture active filters
+                this.activeFilters = {
+                    stages: Array.from(document.querySelectorAll('.stage-toggle.active')).map(t => t.dataset.stage),
+                    priority: parseInt(document.getElementById('prioritySlider')?.value || 0)
+                };
+                
+                console.log('📸 State captured:', {
+                    expandedNodes: Array.from(this.expandedNodes),
+                    scrollPosition: this.scrollPosition,
+                    activeFilters: this.activeFilters
+                });
+            },
+            
+            restoreState() {
+                // Restore expanded nodes
+                this.expandedNodes.forEach(nodeId => {
+                    const childrenContainer = document.getElementById('children-' + nodeId);
+                    const toggleButton = document.querySelector('[data-node-id="' + nodeId + '"] .tree-toggle');
+                    
+                    if (childrenContainer && toggleButton) {
+                        childrenContainer.classList.remove('collapsed');
+                        toggleButton.textContent = '▼';
+                    }
+                });
+                
+                // Restore scroll position
+                const container = document.getElementById('hierarchyContainer');
+                if (container) {
+                    container.scrollTop = this.scrollPosition;
+                }
+                
+                // Restore filters
+                if (this.activeFilters.stages) {
+                    document.querySelectorAll('.stage-toggle').forEach(toggle => {
+                        if (this.activeFilters.stages.includes(toggle.dataset.stage)) {
+                            toggle.classList.add('active');
+                        } else {
+                            toggle.classList.remove('active');
+                        }
+                    });
+                }
+                
+                if (this.activeFilters.priority !== undefined) {
+                    const slider = document.getElementById('prioritySlider');
+                    if (slider) {
+                        slider.value = this.activeFilters.priority;
+                        updatePriorityLabel(this.activeFilters.priority);
+                    }
+                }
+                
+                // Reapply filters
+                applyFilters();
+                updateFilterSummary();
+                
+                console.log('🔄 State restored');
+            }
+        };
+
         function performTaskMove(taskId, newParentId, targetTaskId, oldParentId) {
             // Validate inputs before making API call
             console.log('🔄 performTaskMove called with:', { taskId, newParentId, targetTaskId, oldParentId });
@@ -4324,16 +4623,18 @@ except Exception as e:
                 return;
             }
             
-            // Show loading state
-            const loadingMessage = document.createElement('div');
-            loadingMessage.className = 'loading';
-            loadingMessage.textContent = 'Moving task...';
-            document.getElementById('hierarchyContainer').appendChild(loadingMessage);
+            // Capture current state before move
+            HierarchyState.captureState();
             
-            // Prepare API call
+            // Perform optimistic update
+            const rollbackData = performOptimisticMove(taskId, newParentId, oldParentId);
+            
+            // Prepare API call with partial update support
             const params = new URLSearchParams({
                 task_id: taskId,
-                new_parent_id: newParentId
+                new_parent_id: newParentId,
+                old_parent_id: oldParentId || '',
+                partial: 'true'
             });
             
             // Add project ID if moving to project root
@@ -4345,31 +4646,192 @@ except Exception as e:
             fetch(apiUrl)
                 .then(response => response.json())
                 .then(data => {
-                    loadingMessage.remove();
-                    
                     if (data.success) {
-                        // Store for undo
-                        lastMoveOperation = {
-                            taskId: taskId,
-                            oldParentId: oldParentId,
-                            newParentId: newParentId,
-                            timestamp: Date.now()
-                        };
-                        
-                        // Show success message
-                        showMoveSuccess(data.message || 'Task moved successfully');
-                        
-                        // Refresh hierarchy
-                        refreshCurrentHierarchy();
+                        if (data.partial_update && data.updates) {
+                            // Apply server-side partial updates
+                            applyPartialUpdates(data.updates);
+                            
+                            // Restore state
+                            HierarchyState.restoreState();
+                            
+                            // Store for undo
+                            lastMoveOperation = {
+                                taskId: taskId,
+                                oldParentId: oldParentId,
+                                newParentId: newParentId,
+                                timestamp: Date.now(),
+                                operationId: data.operation_id
+                            };
+                            
+                            showToast(data.message || 'Task moved successfully', 'success');
+                        } else {
+                            // Fallback to full refresh for legacy response
+                            refreshCurrentHierarchy();
+                            showToast(data.message || 'Task moved successfully', 'success');
+                        }
                     } else {
+                        // Rollback optimistic changes
+                        rollbackOptimisticMove(rollbackData);
                         showToast('Move failed: ' + (data.error || 'Unknown error'), 'error');
                     }
                 })
                 .catch(error => {
-                    loadingMessage.remove();
+                    // Rollback optimistic changes
+                    rollbackOptimisticMove(rollbackData);
                     console.error('❌ Move API error:', error);
                     showToast('Move failed: ' + error.message, 'error');
                 });
+        }
+
+        function performOptimisticMove(taskId, newParentId, oldParentId) {
+            console.log('⚡ Performing optimistic move:', { taskId, newParentId, oldParentId });
+            
+            const draggedNode = document.querySelector(`[data-task-id="${taskId}"]`);
+            if (!draggedNode) {
+                console.warn('Could not find dragged node for optimistic update');
+                return null;
+            }
+            
+            // Store rollback data
+            const rollbackData = {
+                node: draggedNode.cloneNode(true),
+                originalParent: draggedNode.parentElement,
+                originalNextSibling: draggedNode.nextElementSibling
+            };
+            
+            // Add visual feedback
+            draggedNode.style.opacity = '0.7';
+            draggedNode.style.transform = 'scale(0.98)';
+            draggedNode.style.transition = 'all 0.3s ease';
+            
+            // Move the node in DOM (simplified optimistic update)
+            if (newParentId === 'root') {
+                // Moving to project root - find project children container
+                const projectChildren = document.querySelector('.tree-view > .tree-node .tree-children');
+                if (projectChildren) {
+                    projectChildren.appendChild(draggedNode);
+                }
+            } else {
+                // Moving to another task
+                const newParentChildren = document.getElementById(`children-node-task-${newParentId}`);
+                if (newParentChildren) {
+                    newParentChildren.appendChild(draggedNode);
+                }
+            }
+            
+            return rollbackData;
+        }
+
+        function rollbackOptimisticMove(rollbackData) {
+            if (!rollbackData) return;
+            
+            console.log('🔄 Rolling back optimistic move');
+            
+            // Find current node and remove it
+            const currentNode = document.querySelector(`[data-task-id="${rollbackData.node.dataset.taskId}"]`);
+            if (currentNode) {
+                currentNode.remove();
+            }
+            
+            // Restore original node at original position
+            if (rollbackData.originalNextSibling) {
+                rollbackData.originalParent.insertBefore(rollbackData.node, rollbackData.originalNextSibling);
+            } else {
+                rollbackData.originalParent.appendChild(rollbackData.node);
+            }
+            
+            // Remove visual feedback
+            rollbackData.node.style.opacity = '';
+            rollbackData.node.style.transform = '';
+            rollbackData.node.style.transition = '';
+        }
+
+        function applyPartialUpdates(updates) {
+            console.log('🔧 Applying partial updates:', updates);
+            
+            try {
+                // Handle removal from old parent
+                if (updates.removed_from) {
+                    const { parent_id, task_id } = updates.removed_from;
+                    const nodeToRemove = document.querySelector(`[data-task-id="${task_id}"]`);
+                    if (nodeToRemove) {
+                        // Add removal animation
+                        nodeToRemove.style.transition = 'all 0.3s ease';
+                        nodeToRemove.style.opacity = '0';
+                        nodeToRemove.style.transform = 'scale(0.8)';
+                        
+                        setTimeout(() => {
+                            if (nodeToRemove.parentElement) {
+                                nodeToRemove.remove();
+                            }
+                        }, 300);
+                    }
+                }
+                
+                // Handle addition to new parent
+                if (updates.added_to && updates.moved_task_data) {
+                    const { parent_id, parent_type } = updates.added_to;
+                    const taskData = updates.moved_task_data;
+                    
+                    // Generate HTML for the moved task
+                    const taskHtml = renderTreeNode(taskData, 1, false);
+                    
+                    // Find target container
+                    let targetContainer;
+                    if (parent_type === 'project' || parent_id === 'root') {
+                        targetContainer = document.querySelector('.tree-view > .tree-node .tree-children');
+                    } else {
+                        targetContainer = document.getElementById(`children-node-task-${parent_id}`);
+                    }
+                    
+                    if (targetContainer && taskHtml) {
+                        // Create temporary container for the new node
+                        const tempDiv = document.createElement('div');
+                        tempDiv.innerHTML = taskHtml;
+                        const newNode = tempDiv.firstElementChild;
+                        
+                        // Add entrance animation
+                        newNode.style.opacity = '0';
+                        newNode.style.transform = 'scale(0.8)';
+                        newNode.style.transition = 'all 0.3s ease';
+                        
+                        targetContainer.appendChild(newNode);
+                        
+                        // Trigger entrance animation
+                        setTimeout(() => {
+                            newNode.style.opacity = '1';
+                            newNode.style.transform = 'scale(1)';
+                        }, 50);
+                        
+                        // Setup drag & drop for new node
+                        setupDragAndDrop();
+                    }
+                }
+                
+                // Handle node metadata updates
+                if (updates.updated_nodes) {
+                    updates.updated_nodes.forEach(update => {
+                        const { node_id, updates: nodeUpdates } = update;
+                        const node = document.querySelector(`[data-node-id="${node_id}"]`);
+                        
+                        if (node && nodeUpdates.child_count_change) {
+                            // Update child count in metadata if displayed
+                            const metadata = node.querySelector('.tree-metadata');
+                            if (metadata) {
+                                // This would update task count displays if they exist
+                                console.log(`Updated child count for ${node_id} by ${nodeUpdates.child_count_change}`);
+                            }
+                        }
+                    });
+                }
+                
+                console.log('✅ Partial updates applied successfully');
+                
+            } catch (error) {
+                console.error('❌ Error applying partial updates:', error);
+                // Fallback to full refresh on error
+                refreshCurrentHierarchy();
+            }
         }
         
         function showMoveSuccess(message) {
@@ -4381,6 +4843,11 @@ except Exception as e:
             
             const hierarchyType = window.currentHierarchy.type;
             const hierarchyId = window.currentHierarchy.root.id;
+            
+            console.log('🔄 Refreshing hierarchy (fallback)');
+            
+            // Capture state before refresh
+            HierarchyState.captureState();
             
             // Reload the hierarchy
             loadHierarchy(hierarchyType, hierarchyId);
