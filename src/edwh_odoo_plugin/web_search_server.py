@@ -1421,11 +1421,14 @@ except Exception as e:
             return node
 
         def collect_filter_data(node, stages=None, priorities=None):
-            """Recursively collect unique stages and priorities"""
+            """Recursively collect unique stages and priorities with optional verbose logging and timing"""
             if stages is None:
                 stages = set()
             if priorities is None:
                 priorities = set()
+
+            verbose = getattr(self, 'verbose', False)
+            t_start = time.time()
             
             def scan_node(current_node):
                 if not current_node:
@@ -1434,29 +1437,39 @@ except Exception as e:
                 if current_node.get('type') == 'task':
                     # Collect stage
                     stage = current_node.get('stage')
-                    if stage and stage.strip():
-                        stages.add(stage.strip())
-                        print(f"   Collected stage: '{stage}'")
+                    if stage and isinstance(stage, str):
+                        s = stage.strip()
+                        if s:
+                            stages.add(s)
+                            if verbose:
+                                print(f"   Collected stage: '{s}'")
                     
                     # Collect priority
                     priority = current_node.get('priority')
-                    if priority and isinstance(priority, dict) and 'level' in priority:
-                        priorities.add(priority['level'])
-                        print(f"   Collected priority level: {priority['level']}")
+                    if priority and isinstance(priority, dict):
+                        lvl = priority.get('level')
+                        if lvl is not None:
+                            priorities.add(lvl)
+                            if verbose:
+                                print(f"   Collected priority level: {lvl}")
                 
                 # Process children recursively
                 children = current_node.get('children', [])
                 if children:
-                    print(f"   Scanning {len(children)} children of {current_node.get('name', 'unnamed')}")
+                    if verbose:
+                        print(f"   Scanning {len(children)} children of {current_node.get('name', 'unnamed')}")
                     for child in children:
                         scan_node(child)
             
-            print(f"🔍 Starting filter data collection from node: {node.get('name', 'unnamed') if node else 'None'}")
+            if verbose:
+                print(f"🔍 Starting filter data collection from node: {node.get('name', 'unnamed') if node else 'None'}")
             scan_node(node)
             
-            print(f"📊 Filter data collection complete:")
-            print(f"   Stages found: {sorted(list(stages))}")
-            print(f"   Priority levels found: {sorted(list(priorities))}")
+            if verbose:
+                print(f"📊 Filter data collection complete:")
+                print(f"   Stages found: {sorted(list(stages))}")
+                print(f"   Priority levels found: {sorted(list(priorities))}")
+                print(f"   Took: {int((time.time() - t_start)*1000)} ms")
             
             return stages, priorities
 
@@ -1489,13 +1502,19 @@ except Exception as e:
                     web_data['root']['children'].append(task_node)
             
             # Collect filter data
-            print(f"🔍 Collecting filter data for project hierarchy...")
+            if getattr(self, 'verbose', False):
+                print(f"🔍 Collecting filter data for project hierarchy...")
+            _t_fd_start = time.time()
             stages, priorities = collect_filter_data(web_data['root'])
             web_data['filter_data'] = {
                 'stages': sorted(list(stages)),
                 'priorities': sorted(list(priorities))
             }
-            print(f"📋 Project filter data: {web_data['filter_data']}")
+            web_data['filter_data_timings'] = {
+                'collect_ms': int((time.time() - _t_fd_start) * 1000)
+            }
+            if getattr(self, 'verbose', False):
+                print(f"📋 Project filter data: {web_data['filter_data']}")
                     
         elif hierarchy_type == 'task':
             # Task hierarchy
@@ -1513,13 +1532,19 @@ except Exception as e:
                     web_data['parents'].append(parent_node)
             
             # Collect filter data
-            print(f"🔍 Collecting filter data for task hierarchy...")
+            if getattr(self, 'verbose', False):
+                print(f"🔍 Collecting filter data for task hierarchy...")
+            _t_fd_start = time.time()
             stages, priorities = collect_filter_data(web_data['root'])
             web_data['filter_data'] = {
                 'stages': sorted(list(stages)),
                 'priorities': sorted(list(priorities))
             }
-            print(f"📋 Task filter data: {web_data['filter_data']}")
+            web_data['filter_data_timings'] = {
+                'collect_ms': int((time.time() - _t_fd_start) * 1000)
+            }
+            if getattr(self, 'verbose', False):
+                print(f"📋 Task filter data: {web_data['filter_data']}")
         
         return web_data
 

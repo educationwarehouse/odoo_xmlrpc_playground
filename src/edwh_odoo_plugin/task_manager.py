@@ -15,6 +15,7 @@ Date: December 2024
 """
 
 import re
+import time
 from .odoo_base import OdooBase
 from .text_search import OdooTextSearch
 
@@ -604,93 +605,158 @@ class TaskManager(OdooBase):
 
     def show_project_hierarchy(self, project_id, max_depth=3):
         """
-        Show complete project hierarchy with all tasks and their subtasks
+        Show complete project hierarchy with all tasks and their subtasks.
+        Single-fetch implementation that builds the tree in-memory to avoid N+1 RPCs.
         
         Args:
             project_id: ID of the project to show hierarchy for
-            max_depth: Maximum depth to traverse for task subtasks
+            max_depth: Maximum depth to traverse for task subtasks (>=1)
             
         Returns:
             dict: Result with project hierarchy data
         """
         try:
+            t_total_start = time.time()
             # Progress indicators based on verbosity level
             if self.verbosity_level == 0:
                 print("🔍 Loading project hierarchy...", end="", flush=True)
+
+            # Normalize inputs
+            project_id_int = int(project_id)
+            depth_limit = max(1, int(max_depth) if max_depth is not None else 3)
             
             # Get the project
-            project_records = self.projects.search_records([('id', '=', int(project_id))])
+            t_proj_start = time.time()
+            project_records = self.projects.search_records([('id', '=', project_id_int)])
+            t_proj_ms = int((time.time() - t_proj_start) * 1000)
             if not project_records:
                 return {
                     'success': False,
                     'error': f'Project with ID {project_id} not found'
                 }
-            
             project = project_records[0]
-            
+
             if self.verbosity_level >= 2:
-                print(f"🔍 Searching for tasks in project {project_id} ('{project.name}')")
+                print(f"🔍 Searching for tasks in project {project_id_int} ('{getattr(project, 'name', 'Unknown Project')}')")
             elif self.verbosity_level == 0:
-                print(f"\r🔍 Loading tasks...", end="", flush=True)
-            
-            # Get all tasks in this project - use the working approach
-            all_tasks = self.tasks.search_records([('project_id', '=', int(project_id))])
-            
+                print("\r🔍 Loading tasks...", end="", flush=True)
+
+            # Get all tasks in this project once
+            t_tasks_start = time.time()
+            all_tasks = self.tasks.search_records([('project_id', '=', project_id_int)])
+            t_tasks_ms = int((time.time() - t_tasks_start) * 1000)
+
             if self.verbosity_level >= 2:
-                print(f"🔍 Found {len(all_tasks)} tasks in project {project_id}")
+                print(f"🔍 Found {len(all_tasks)} tasks in project {project_id_int}")
+                print(f"⏱ Project fetch: {t_proj_ms} ms, Tasks fetch: {t_tasks_ms} ms")
             elif self.verbosity_level == 0:
                 print(f"\r🔍 Processing {len(all_tasks)} tasks...", end="", flush=True)
-            
-            # Separate main tasks (no parent) from subtasks
-            main_tasks = []
-            all_task_ids = set()
-            
-            for task in all_tasks:
-                all_task_ids.add(task.id)
-                # Check if task has no parent (is a main task)
-                if not hasattr(task, 'parent_id') or not task.parent_id:
-                    main_tasks.append(task)
-                    if self.verbosity_level >= 2:
-                        print(f"   Main task: {task.name} (ID: {task.id})")
-            
+
+            if not all_tasks:
+                t_total_ms = int((time.time() - t_total_start) * 1000)
+                # No tasks: return empty hierarchy but valid project info
+                return {
+                    'success': True,
+                    'hierarchy': {
+                        'project': self._project_to_dict(project),
+                        'main_tasks': [],
+                        'total_tasks': 0,
+                        'main_task_count': 0,
+                        'timings': {
+                            'project_fetch_ms': t_proj_ms,
+                            'tasks_fetch_ms': t_tasks_ms,
+                            'index_build_ms': 0,
+                            'assembly_ms': 0,
+                            'total_ms': t_total_ms,
+                        }
+                    }
+                }
+
+            # Build indices in O(N)
+            t_index_start = time.time()
+            def get_id(value):
+                # Handles both many2one-like objects and raw ints
+                try:
+                    if hasattr(value, 'id'):
+                        return value.id
+                    return int(value) if value else None
+                except Exception:
+                    return None
+
+            by_id = {}
+            children_by_parent = {}
+
+            for t in all_tasks:
+                by_id[t.id] = t
+                pid = get_id(getattr(t, 'parent_id', None))
+                children_by_parent.setdefault(pid, []).append(t)
+            t_index_ms = int((time.time() - t_index_start) * 1000)
+
+            # Determine main tasks (no parent)
+            main_tasks = children_by_parent.get(None, []) + children_by_parent.get(False, [])
+            # Deduplicate in case both None and False keys contain same tasks
+            seen_main = set()
+            main_tasks = [x for x in main_tasks if not (x.id in seen_main or seen_main.add(x.id))]
+
             if self.verbosity_level >= 2:
                 print(f"🔍 Found {len(main_tasks)} main tasks (without parents)")
+                print(f"⏱ Index build: {t_index_ms} ms")
             elif self.verbosity_level == 0:
-                print(f"\r🔍 Building hierarchy...", end="", flush=True)
-            
-            # Build hierarchy for each main task
+                print("\r🔍 Building hierarchy...", end="", flush=True)
+
+            # Depth-limited recursive assembly using in-memory index
+            def build_node(task, depth):
+                node = self._task_to_dict(task)
+                if depth >= depth_limit:
+                    node['children'] = []
+                    return node
+                child_nodes = []
+                for c in children_by_parent.get(task.id, []):
+                    child_nodes.append(build_node(c, depth + 1))
+                node['children'] = child_nodes
+                return node
+
+            t_assembly_start = time.time()
             project_hierarchy = {
                 'project': self._project_to_dict(project),
                 'main_tasks': [],
                 'total_tasks': len(all_tasks),
-                'main_task_count': len(main_tasks)
+                'main_task_count': len(main_tasks),
             }
-            
+
             for i, main_task in enumerate(main_tasks):
                 if self.verbosity_level == 0:
                     print(f"\r🔍 Processing task {i+1}/{len(main_tasks)}...", end="", flush=True)
-                
-                task_dict = self._task_to_dict(main_task)
-                
-                # Get children recursively
-                task_dict['children'] = self._get_children_recursive(main_task.id, max_depth)
-                
-                project_hierarchy['main_tasks'].append(task_dict)
-            
+                project_hierarchy['main_tasks'].append(build_node(main_task, 1))
+
+            t_assembly_ms = int((time.time() - t_assembly_start) * 1000)
+            t_total_ms = int((time.time() - t_total_start) * 1000)
+
+            project_hierarchy['timings'] = {
+                'project_fetch_ms': t_proj_ms,
+                'tasks_fetch_ms': t_tasks_ms,
+                'index_build_ms': t_index_ms,
+                'assembly_ms': t_assembly_ms,
+                'total_ms': t_total_ms,
+            }
+
+            if self.verbosity_level >= 2:
+                print(f"⏱ Assembly: {t_assembly_ms} ms, Total: {t_total_ms} ms")
+
             if self.verbosity_level == 0:
-                print(f"\r" + " " * 50 + "\r", end="")  # Clear progress line
-            
+                print("\r" + " " * 50 + "\r", end="")  # Clear progress line
+
             return {
                 'success': True,
-                'hierarchy': project_hierarchy
+                'hierarchy': project_hierarchy,
             }
-            
+
         except Exception as e:
             if not self.verbose:
-                print(f"\r" + " " * 50 + "\r", end="")  # Clear progress line
+                print("\r" + " " * 50 + "\r", end="")  # Clear progress line
             return {
                 'success': False,
-                'error': str(e)
+                'error': str(e),
             }
 
     def print_project_hierarchy(self, hierarchy):

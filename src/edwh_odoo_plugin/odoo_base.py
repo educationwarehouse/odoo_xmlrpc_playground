@@ -22,6 +22,7 @@ from dotenv import load_dotenv
 from openerp_proxy import Client
 from openerp_proxy.ext.all import *
 import warnings
+import time
 
 # Configure secure logging
 logging.basicConfig(level=logging.WARNING)
@@ -240,6 +241,10 @@ class OdooBase:
 
         # Build base URL for links
         self.base_url = f"https://{self.host}"
+
+        # Simple in-memory caches
+        self._user_name_cache = {}  # user_id -> (ts, name)
+        self._user_name_ttl = 300   # seconds
 
         self._connect()
 
@@ -640,14 +645,36 @@ class OdooBase:
             return markdown_content
 
     def _get_user_name(self, user_id):
-        """Get user name - to be implemented by subclasses with caching"""
+        """Get user name with a small in-memory TTL cache to reduce RPC calls"""
         if not user_id:
             return 'Unassigned'
+
+        # Check cache
+        try:
+            entry = self._user_name_cache.get(user_id)
+            now = time.time()
+            if entry:
+                ts, name = entry
+                if now - ts <= self._user_name_ttl:
+                    return name
+                else:
+                    # Expired; remove to allow refresh
+                    self._user_name_cache.pop(user_id, None)
+        except Exception:
+            # If cache fails for any reason, fall back to direct fetch
+            pass
         
+        # Fetch from server on miss
         try:
             user_records = self.client['res.users'].search_records([('id', '=', user_id)])
             if user_records:
-                return user_records[0].name
+                name = user_records[0].name
+                # Store in cache
+                try:
+                    self._user_name_cache[user_id] = (time.time(), name)
+                except Exception:
+                    pass
+                return name
         except Exception as e:
             if self.verbose:
                 print(f"⚠️ Could not get user {user_id}: {e}")
