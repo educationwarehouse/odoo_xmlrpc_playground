@@ -1213,15 +1213,36 @@ except Exception as e:
             if priorities is None:
                 priorities = set()
             
-            if node and node.get('type') == 'task':
-                if node.get('stage'):
-                    stages.add(node['stage'])
-                if node.get('priority'):
-                    priorities.add(node['priority']['level'])
+            def scan_node(current_node):
+                if not current_node:
+                    return
+                    
+                if current_node.get('type') == 'task':
+                    # Collect stage
+                    stage = current_node.get('stage')
+                    if stage and stage.strip():
+                        stages.add(stage.strip())
+                        print(f"   Collected stage: '{stage}'")
+                    
+                    # Collect priority
+                    priority = current_node.get('priority')
+                    if priority and isinstance(priority, dict) and 'level' in priority:
+                        priorities.add(priority['level'])
+                        print(f"   Collected priority level: {priority['level']}")
                 
-                # Process children
-                for child in node.get('children', []):
-                    collect_filter_data(child, stages, priorities)
+                # Process children recursively
+                children = current_node.get('children', [])
+                if children:
+                    print(f"   Scanning {len(children)} children of {current_node.get('name', 'unnamed')}")
+                    for child in children:
+                        scan_node(child)
+            
+            print(f"🔍 Starting filter data collection from node: {node.get('name', 'unnamed') if node else 'None'}")
+            scan_node(node)
+            
+            print(f"📊 Filter data collection complete:")
+            print(f"   Stages found: {sorted(list(stages))}")
+            print(f"   Priority levels found: {sorted(list(priorities))}")
             
             return stages, priorities
 
