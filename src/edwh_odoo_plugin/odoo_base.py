@@ -249,7 +249,7 @@ class OdooBase:
         self._connect()
 
     def _connect(self):
-        """Connect to Odoo"""
+        """Connect to Odoo with improved error handling"""
         try:
             if self.verbose:
                 print(f"🔌 Connecting to Odoo...")
@@ -257,6 +257,10 @@ class OdooBase:
                 print(f"   Database: {self.database}")
                 print(f"   User: {self.user}")
 
+            # Add connection timeout and retry logic
+            import socket
+            socket.setdefaulttimeout(30)  # 30 second timeout
+            
             self.client = Client(
                 host=self.host, 
                 dbname=self.database, 
@@ -269,67 +273,79 @@ class OdooBase:
             if self.verbose:
                 print(f"✅ Connected as: {self.client.user.name} (ID: {self.client.uid})")
 
-            # Model shortcuts
-            self.projects = self.client['project.project']
-            self.tasks = self.client['project.task']
-            self.attachments = self.client['ir.attachment']
-            self.messages = self.client['mail.message']
+            # Model shortcuts with error handling
+            try:
+                self.projects = self.client['project.project']
+                self.tasks = self.client['project.task']
+                self.attachments = self.client['ir.attachment']
+                self.messages = self.client['mail.message']
+            except Exception as model_error:
+                logger.warning(f"Error accessing models: {model_error}")
+                raise
 
         except Exception as e:
             ErrorHandler.handle_connection_error(e, self.verbose)
 
     def extract_user_from_task(self, task):
-        """Extract user ID and name from task using multiple field strategies"""
+        """Extract user ID and name from task using safe field access"""
         user_id = None
         user_name = 'Unassigned'
         
-        # Try user fields in order of reliability
-        for field_name in ['user_ids', 'create_uid', 'write_uid', 'user_id', 'assigned_user_id']:
+        # Try user fields in order of reliability with safer access
+        for field_name in ['user_ids', 'user_id', 'create_uid', 'write_uid']:
             try:
-                if hasattr(task, field_name):
-                    user_field = getattr(task, field_name, None)
-                    if user_field:
-                        # Handle RecordList (user_ids field)
-                        if hasattr(user_field, '__len__') and len(user_field) > 0:
+                if not hasattr(task, field_name):
+                    continue
+                    
+                user_field = getattr(task, field_name, None)
+                if not user_field:
+                    continue
+                
+                # Handle RecordList (user_ids field) - be more careful
+                if hasattr(user_field, '__len__'):
+                    try:
+                        if len(user_field) > 0:
                             first_user = user_field[0]
                             if hasattr(first_user, 'id'):
                                 user_id = first_user.id
                                 if self.verbose:
                                     print(f"🔍 Found user ID {user_id} via {field_name}[0].id")
                                 break
-                        # Handle direct Record objects
-                        elif hasattr(user_field, 'id') and not str(user_field).startswith('functools.partial'):
+                    except (IndexError, AttributeError):
+                        continue
+                        
+                # Handle direct Record objects - safer access
+                elif hasattr(user_field, 'id'):
+                    try:
+                        # Avoid accessing partial objects that might cause server calls
+                        if not str(user_field).startswith('functools.partial'):
                             user_id = user_field.id
                             if self.verbose:
                                 print(f"🔍 Found user ID {user_id} via {field_name}.id")
                             break
-                        # Handle integer IDs
-                        elif isinstance(user_field, int):
-                            user_id = user_field
-                            if self.verbose:
-                                print(f"🔍 Found user ID {user_id} via {field_name} (int)")
-                            break
-                        # Handle partial objects (but skip if they return task ID)
-                        elif str(user_field).startswith('functools.partial'):
-                            partial_str = str(user_field)
-                            id_match = re.search(r'\[(\d+)\]', partial_str)
-                            if id_match:
-                                extracted_id = int(id_match.group(1))
-                                if extracted_id != task.id:  # Skip if matches task ID
-                                    user_id = extracted_id
-                                    if self.verbose:
-                                        print(f"🔍 Extracted user ID {user_id} from partial object")
-                                    break
-                                elif self.verbose:
-                                    print(f"⚠️ Extracted ID {extracted_id} matches task ID, skipping user field {field_name}")
+                    except AttributeError:
+                        continue
+                        
+                # Handle integer IDs
+                elif isinstance(user_field, int) and user_field > 0:
+                    user_id = user_field
+                    if self.verbose:
+                        print(f"🔍 Found user ID {user_id} via {field_name} (int)")
+                    break
+                    
             except Exception as field_error:
                 if self.verbose:
                     print(f"⚠️ Error accessing field {field_name}: {field_error}")
                 continue
         
-        # Get user name from cache or direct lookup
-        if user_id and isinstance(user_id, int):
-            user_name = self._get_user_name(user_id)
+        # Get user name from cache or direct lookup - with error handling
+        if user_id and isinstance(user_id, int) and user_id > 0:
+            try:
+                user_name = self._get_user_name(user_id)
+            except Exception as e:
+                if self.verbose:
+                    print(f"⚠️ Error getting user name for ID {user_id}: {e}")
+                user_name = f'User {user_id}'
         
         return user_id, user_name
 

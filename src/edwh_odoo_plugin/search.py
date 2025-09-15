@@ -85,23 +85,29 @@ class OdooProjectFileSearchFinal(OdooBase):
 
     def _build_working_domain(self, project_ids=None, task_ids=None):
         """
-        Bouw werkend plat domein met 'IN' operator
-
-        Gebaseerd op succesvolle test:
-        ✅ [('res_model', '=', 'project.project')] werkt
-        ✅ [('res_id', 'in', [70, 57, 37])] werkt
-        ✅ ['&', ('res_model', '=', 'project.project'), ('res_id', 'in', [...])] werkt
+        Bouw werkend plat domein met 'IN' operator - with size limits
         """
         conditions = []
-
+        
+        # Limit ID list sizes to prevent server overload
+        max_ids = 500  # Reasonable limit for IN queries
+        
         if project_ids:
-            # Project bestanden condition
-            project_condition = ['&', ('res_model', '=', 'project.project'), ('res_id', 'in', project_ids)]
+            # Limit project IDs to prevent server errors
+            limited_project_ids = project_ids[:max_ids] if len(project_ids) > max_ids else project_ids
+            if self.verbose and len(project_ids) > max_ids:
+                print(f"⚠️ Limited project IDs from {len(project_ids)} to {max_ids}")
+            
+            project_condition = ['&', ('res_model', '=', 'project.project'), ('res_id', 'in', limited_project_ids)]
             conditions.append(project_condition)
 
         if task_ids:
-            # Task bestanden condition
-            task_condition = ['&', ('res_model', '=', 'project.task'), ('res_id', 'in', task_ids)]
+            # Limit task IDs to prevent server errors
+            limited_task_ids = task_ids[:max_ids] if len(task_ids) > max_ids else task_ids
+            if self.verbose and len(task_ids) > max_ids:
+                print(f"⚠️ Limited task IDs from {len(task_ids)} to {max_ids}")
+            
+            task_condition = ['&', ('res_model', '=', 'project.task'), ('res_id', 'in', limited_task_ids)]
             conditions.append(task_condition)
 
         # Combineer met OR - PLATTE STRUCTUUR

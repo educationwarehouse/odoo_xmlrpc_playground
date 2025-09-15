@@ -52,79 +52,123 @@ class TaskManager(OdooBase):
             dict: Result with success status and details
         """
         try:
-            # Batch validation: get both tasks in a single query
-            task_ids = [int(subtask_id), int(new_parent_id)]
-            task_records = self.tasks.search_records([('id', 'in', task_ids)])
+            # Validate input IDs
+            try:
+                subtask_id = int(subtask_id)
+                new_parent_id = int(new_parent_id)
+                if target_project_id is not None:
+                    target_project_id = int(target_project_id)
+            except (ValueError, TypeError):
+                return {
+                    'success': False,
+                    'error': 'Invalid ID format provided'
+                }
             
-            # Create lookup dict for found tasks
-            found_tasks = {task.id: task for task in task_records}
+            # Safe batch validation: get both tasks with error handling
+            try:
+                task_ids = [subtask_id, new_parent_id]
+                task_records = self.tasks.search_records([('id', 'in', task_ids)])
+            except Exception as search_error:
+                return {
+                    'success': False,
+                    'error': f'Failed to search for tasks: {search_error}'
+                }
+            
+            # Create lookup dict for found tasks with safe access
+            found_tasks = {}
+            for task in task_records:
+                try:
+                    found_tasks[task.id] = task
+                except AttributeError:
+                    continue
             
             # Validate subtask exists
-            if int(subtask_id) not in found_tasks:
+            if subtask_id not in found_tasks:
                 return {
                     'success': False,
                     'error': f'Subtask with ID {subtask_id} not found'
                 }
             
-            subtask = found_tasks[int(subtask_id)]
+            subtask = found_tasks[subtask_id]
             
             # Validate new parent exists
-            if int(new_parent_id) not in found_tasks:
+            if new_parent_id not in found_tasks:
                 return {
                     'success': False,
                     'error': f'Parent task with ID {new_parent_id} not found'
                 }
             
-            new_parent = found_tasks[int(new_parent_id)]
+            new_parent = found_tasks[new_parent_id]
             
-            # Validate project if specified
+            # Validate project if specified - with safe access
             project_name = None
             if target_project_id:
-                project_records = self.projects.search_records([('id', '=', int(target_project_id))])
-                if not project_records:
+                try:
+                    project_records = self.projects.search_records([('id', '=', target_project_id)])
+                    if not project_records:
+                        return {
+                            'success': False,
+                            'error': f'Project with ID {target_project_id} not found'
+                        }
+                    project_name = getattr(project_records[0], 'name', f'Project {target_project_id}')
+                except Exception as project_error:
                     return {
                         'success': False,
-                        'error': f'Project with ID {target_project_id} not found'
+                        'error': f'Failed to validate project: {project_error}'
                     }
-                project_name = project_records[0].name
             
-            # Check for circular dependency
-            if self._would_create_circular_dependency(int(subtask_id), int(new_parent_id)):
-                return {
-                    'success': False,
-                    'error': 'Cannot move task: would create circular dependency'
-                }
+            # Check for circular dependency with error handling
+            try:
+                if self._would_create_circular_dependency(subtask_id, new_parent_id):
+                    return {
+                        'success': False,
+                        'error': 'Cannot move task: would create circular dependency'
+                    }
+            except Exception as circular_error:
+                if self.verbose:
+                    print(f"⚠️ Could not check circular dependency: {circular_error}")
+                # Continue anyway - better to allow the move than block it
             
             # Prepare update values
-            vals = {"parent_id": int(new_parent_id)}
+            vals = {"parent_id": new_parent_id}
             if target_project_id is not None:
-                vals["project_id"] = int(target_project_id)
+                vals["project_id"] = target_project_id
             
             if self.verbose:
                 print(f"🔄 Moving subtask {subtask_id} to parent {new_parent_id}")
                 if target_project_id:
                     print(f"   Also moving to project {target_project_id}")
             
-            # Perform the move
-            success = self.tasks.write([int(subtask_id)], vals)
+            # Perform the move with error handling
+            try:
+                success = self.tasks.write([subtask_id], vals)
+            except Exception as write_error:
+                return {
+                    'success': False,
+                    'error': f'Write operation failed: {write_error}'
+                }
             
             if success:
+                # Safe name access
+                subtask_name = getattr(subtask, 'name', f'Task {subtask_id}')
+                new_parent_name = getattr(new_parent, 'name', f'Task {new_parent_id}')
+                
                 return {
                     'success': True,
-                    'subtask_name': subtask.name,
-                    'new_parent_name': new_parent.name,
+                    'subtask_name': subtask_name,
+                    'new_parent_name': new_parent_name,
                     'project_name': project_name
                 }
             else:
                 return {
                     'success': False,
-                    'error': 'Write operation failed'
+                    'error': 'Write operation returned False'
                 }
                 
         except Exception as e:
             return {
                 'success': False,
-                'error': str(e)
+                'error': f'Unexpected error: {str(e)[:200]}'  # Limit error message length
             }
 
     def promote_task(self, task_id):

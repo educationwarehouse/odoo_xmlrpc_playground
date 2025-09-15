@@ -160,7 +160,7 @@ class OdooTextSearch(OdooBase):
 
     def search_projects(self, search_term, since=None, include_descriptions=True, limit=None):
         """
-        Search in project names and descriptions using direct database queries
+        Search in project names and descriptions using safe database queries
         
         Args:
             search_term: Text to search for
@@ -184,77 +184,117 @@ class OdooTextSearch(OdooBase):
             print(f"🔍 Searching projects...", end="", flush=True)
         
         try:
-            # Build domain using DomainBuilder
-            from .odoo_base import DomainBuilder
+            # Build simple, safe domain
+            domain = []
             
-            # Time filter
-            date_domain = DomainBuilder.date_filter_domain(since)
-            
-            # Text search with sanitized term
-            text_fields = ['name', 'description'] if include_descriptions else ['name']
-            text_domain = DomainBuilder.text_search_domain(sanitized_term, text_fields, include_descriptions)
-            
-            # Combine domains
-            if date_domain:
-                final_domain = DomainBuilder.combine_with_and(text_domain, *date_domain)
+            # Text search - use simple structure
+            if include_descriptions:
+                domain = ['|', ('name', 'ilike', sanitized_term), ('description', 'ilike', sanitized_term)]
             else:
-                final_domain = text_domain
+                domain = [('name', 'ilike', sanitized_term)]
+            
+            # Add time filter if specified
+            if since:
+                date_condition = ('write_date', '>=', since.strftime('%Y-%m-%d %H:%M:%S'))
+                if domain:
+                    domain = ['&'] + domain + [date_condition]
+                else:
+                    domain = [date_condition]
             
             if self.verbose:
-                print(f"🔧 Project domain: {final_domain}")
+                print(f"🔧 Project domain: {domain}")
             
-            # Apply limit at database level
+            # Search with safe parameters
             search_kwargs = {
-                'limit': limit,
+                'limit': min(limit, 1000),  # Hard limit to prevent server overload
                 'order': 'write_date desc'
             }
             
-            projects = self.projects.search_records(final_domain, **search_kwargs)
+            projects = self.projects.search_records(domain, **search_kwargs)
             
             if self.verbose:
                 print(f"📂 Found {len(projects)} matching projects")
             else:
                 print(f" {len(projects)} found", flush=True)
             
-            # Cache found projects for future use
+            # Process projects with safe field access
             enriched_projects = []
             for project in projects:
-                # Convert description to markdown
-                raw_description = getattr(project, 'description', '') or ''
-                markdown_description = self.html_to_markdown(raw_description) if raw_description else ''
-                
-                project_data = {
-                    'id': project.id,
-                    'name': project.name,
-                    'description': markdown_description,
-                    'partner_id': project.partner_id.id if project.partner_id else None,
-                    'partner_name': project.partner_id.name if project.partner_id else 'No client',
-                    'user_id': project.user_id.id if project.user_id else None,
-                    'user_name': project.user_id.name if project.user_id else 'Unassigned',
-                    'create_date': str(project.create_date) if project.create_date else '',
-                    'write_date': str(project.write_date) if project.write_date else '',
-                    'stage_id': getattr(project, 'stage_id', None)
-                }
-                
-                # Cache this project for future lookups
-                self.project_cache[project.id] = project_data
-                
-                # Create enriched result
-                enriched_project = {
-                    'id': project_data['id'],
-                    'name': project_data['name'],
-                    'description': project_data['description'],
-                    'partner': project_data['partner_name'],
-                    'stage': project_data['stage_id'],
-                    'user': project_data['user_name'],
-                    'create_date': project_data['create_date'],
-                    'write_date': project_data['write_date'],
-                    'type': 'project',
-                    'search_term': search_term,
-                    'match_in_name': search_term.lower() in project_data['name'].lower(),
-                    'match_in_description': search_term.lower() in project_data['description'].lower()
-                }
-                enriched_projects.append(enriched_project)
+                try:
+                    # Safe field access with fallbacks
+                    project_data = {
+                        'id': project.id,
+                        'name': getattr(project, 'name', f'Project {project.id}'),
+                        'description': '',
+                        'partner_id': None,
+                        'partner_name': 'No client',
+                        'user_id': None,
+                        'user_name': 'Unassigned',
+                        'create_date': '',
+                        'write_date': '',
+                        'stage_id': None
+                    }
+                    
+                    # Safe description access
+                    try:
+                        raw_description = getattr(project, 'description', '') or ''
+                        project_data['description'] = self.html_to_markdown(raw_description) if raw_description else ''
+                    except Exception:
+                        project_data['description'] = ''
+                    
+                    # Safe partner access
+                    try:
+                        if hasattr(project, 'partner_id') and project.partner_id:
+                            project_data['partner_id'] = project.partner_id.id if hasattr(project.partner_id, 'id') else None
+                            project_data['partner_name'] = project.partner_id.name if hasattr(project.partner_id, 'name') else 'No client'
+                    except Exception:
+                        pass
+                    
+                    # Safe user access
+                    try:
+                        if hasattr(project, 'user_id') and project.user_id:
+                            project_data['user_id'] = project.user_id.id if hasattr(project.user_id, 'id') else None
+                            project_data['user_name'] = project.user_id.name if hasattr(project.user_id, 'name') else 'Unassigned'
+                    except Exception:
+                        pass
+                    
+                    # Safe date access
+                    try:
+                        project_data['create_date'] = str(project.create_date) if hasattr(project, 'create_date') and project.create_date else ''
+                        project_data['write_date'] = str(project.write_date) if hasattr(project, 'write_date') and project.write_date else ''
+                    except Exception:
+                        pass
+                    
+                    # Safe stage access
+                    try:
+                        project_data['stage_id'] = getattr(project, 'stage_id', None)
+                    except Exception:
+                        pass
+                    
+                    # Cache this project for future lookups
+                    self.project_cache[project.id] = project_data
+                    
+                    # Create enriched result
+                    enriched_project = {
+                        'id': project_data['id'],
+                        'name': project_data['name'],
+                        'description': project_data['description'],
+                        'partner': project_data['partner_name'],
+                        'stage': project_data['stage_id'],
+                        'user': project_data['user_name'],
+                        'create_date': project_data['create_date'],
+                        'write_date': project_data['write_date'],
+                        'type': 'project',
+                        'search_term': search_term,
+                        'match_in_name': search_term.lower() in project_data['name'].lower(),
+                        'match_in_description': search_term.lower() in project_data['description'].lower()
+                    }
+                    enriched_projects.append(enriched_project)
+                    
+                except Exception as project_error:
+                    if self.verbose:
+                        print(f"⚠️ Error processing project {getattr(project, 'id', 'unknown')}: {project_error}")
+                    continue
             
             return enriched_projects
             
