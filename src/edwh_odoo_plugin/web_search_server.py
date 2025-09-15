@@ -2209,8 +2209,9 @@ except Exception as e:
         }
         
         .hierarchy-container {
-            max-height: 70vh;
-            overflow-y: auto;
+            /* Allow the tree to take all required vertical space; avoid inner scrolling */
+            max-height: none;
+            overflow: visible;
             border: 1px solid var(--border-color);
             border-radius: 8px;
             background: var(--bg-color);
