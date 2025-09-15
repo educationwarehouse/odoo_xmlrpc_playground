@@ -1254,11 +1254,13 @@ except Exception as e:
                     web_data['root']['children'].append(task_node)
             
             # Collect filter data
+            print(f"🔍 Collecting filter data for project hierarchy...")
             stages, priorities = collect_filter_data(web_data['root'])
             web_data['filter_data'] = {
                 'stages': sorted(list(stages)),
                 'priorities': sorted(list(priorities))
             }
+            print(f"📋 Project filter data: {web_data['filter_data']}")
                     
         elif hierarchy_type == 'task':
             # Task hierarchy
@@ -1276,11 +1278,13 @@ except Exception as e:
                     web_data['parents'].append(parent_node)
             
             # Collect filter data
+            print(f"🔍 Collecting filter data for task hierarchy...")
             stages, priorities = collect_filter_data(web_data['root'])
             web_data['filter_data'] = {
                 'stages': sorted(list(stages)),
                 'priorities': sorted(list(priorities))
             }
+            print(f"📋 Task filter data: {web_data['filter_data']}")
         
         return web_data
 
@@ -3818,22 +3822,20 @@ except Exception as e:
             const container = document.getElementById('hierarchyContainer');
             const filtersContainer = document.getElementById('hierarchyFilters');
             
-            console.log('Displaying hierarchy:', hierarchy);
-            console.log('Hierarchy type:', hierarchy.type);
-            console.log('Root node:', hierarchy.root);
+            console.log('🌳 Displaying hierarchy:', hierarchy);
+            console.log('Hierarchy type:', hierarchy?.type);
+            console.log('Root node:', hierarchy?.root);
+            console.log('Filter data available:', !!hierarchy?.filter_data);
+            console.log('Filter data content:', hierarchy?.filter_data);
             
             if (!hierarchy || !hierarchy.root) {
-                console.error('Invalid hierarchy data:', hierarchy);
+                console.error('❌ Invalid hierarchy data:', hierarchy);
                 container.innerHTML = '<div class="error">Invalid hierarchy data received</div>';
                 return;
             }
             
             // Store hierarchy globally for filtering and drag & drop
             window.currentHierarchy = hierarchy;
-            
-            // Setup filters
-            setupHierarchyFilters(hierarchy);
-            filtersContainer.style.display = 'block';
             
             let html = '';
             
@@ -3864,6 +3866,11 @@ except Exception as e:
             console.log('Generated HTML length:', html.length);
             console.log('Generated HTML preview:', html.substring(0, 500) + '...');
             container.innerHTML = html;
+            
+            // Setup filters AFTER DOM is populated
+            console.log('🔧 Setting up filters after DOM population...');
+            setupHierarchyFilters(hierarchy);
+            filtersContainer.style.display = 'block';
             
             // Setup drag & drop
             setupDragAndDrop();
@@ -4046,30 +4053,117 @@ except Exception as e:
         
         // Hierarchy Filtering System
         function setupHierarchyFilters(hierarchy) {
-            if (!hierarchy.filter_data) return;
+            console.log('🔧 Setting up hierarchy filters...');
+            console.log('Hierarchy object:', hierarchy);
+            console.log('Filter data:', hierarchy?.filter_data);
             
             const stageFilters = document.getElementById('stageFilters');
             const prioritySlider = document.getElementById('prioritySlider');
             
-            // Setup stage filters - make sure all stages are initially active
+            if (!stageFilters || !prioritySlider) {
+                console.error('❌ Filter UI elements not found');
+                return;
+            }
+            
+            // Clear existing filters
             stageFilters.innerHTML = '';
-            hierarchy.filter_data.stages.forEach(stage => {
+            
+            // Get stages from multiple sources with fallback
+            let stages = [];
+            
+            // Primary: Use hierarchy.filter_data.stages
+            if (hierarchy?.filter_data?.stages && Array.isArray(hierarchy.filter_data.stages)) {
+                stages = hierarchy.filter_data.stages;
+                console.log('✅ Using hierarchy.filter_data.stages:', stages);
+            } else {
+                console.warn('⚠️ hierarchy.filter_data.stages not available, using fallback');
+                // Fallback: Scan DOM for actual stage values
+                stages = extractStagesFromDOM();
+                console.log('🔄 Extracted stages from DOM:', stages);
+            }
+            
+            // Emergency fallback: Scan hierarchy data directly
+            if (stages.length === 0) {
+                console.warn('⚠️ No stages found in DOM, scanning hierarchy data directly');
+                stages = extractStagesFromHierarchyData(hierarchy);
+                console.log('🔍 Extracted stages from hierarchy data:', stages);
+            }
+            
+            // Final fallback: Common stage names
+            if (stages.length === 0) {
+                console.warn('⚠️ No stages found anywhere, using default stages');
+                stages = ['No Stage', 'Inbox', 'In Progress', 'Done', 'Cancelled'];
+                console.log('📋 Using default stages:', stages);
+            }
+            
+            // Remove duplicates and sort
+            stages = [...new Set(stages)].sort();
+            console.log('📊 Final stages list:', stages);
+            
+            // Create stage filter toggles
+            stages.forEach(stage => {
                 const toggle = document.createElement('span');
                 toggle.className = 'stage-toggle active';
                 toggle.textContent = stage;
                 toggle.dataset.stage = stage;
                 toggle.onclick = () => toggleStageFilter(stage, toggle);
+                toggle.title = `Toggle ${stage} tasks`;
                 stageFilters.appendChild(toggle);
+                console.log(`➕ Added stage filter: ${stage}`);
             });
             
             // Setup priority filter
             prioritySlider.value = 0;
             updatePriorityLabel(0);
             
+            // Update UI
             updateFilterSummary();
             
             // Apply filters immediately to ensure all stages are visible initially
             applyFilters();
+            
+            console.log('✅ Hierarchy filters setup complete');
+        }
+        
+        function extractStagesFromDOM() {
+            const stages = new Set();
+            const taskNodes = document.querySelectorAll('.tree-node[data-type="task"]');
+            
+            console.log(`🔍 Scanning ${taskNodes.length} task nodes for stages...`);
+            
+            taskNodes.forEach(node => {
+                const stage = node.dataset.stage;
+                if (stage && stage.trim()) {
+                    stages.add(stage.trim());
+                    console.log(`  Found stage: "${stage}"`);
+                }
+            });
+            
+            return Array.from(stages);
+        }
+        
+        function extractStagesFromHierarchyData(hierarchy) {
+            const stages = new Set();
+            
+            function scanNode(node) {
+                if (!node) return;
+                
+                if (node.type === 'task' && node.stage) {
+                    stages.add(node.stage);
+                    console.log(`  Found stage in hierarchy data: "${node.stage}"`);
+                }
+                
+                if (node.children && Array.isArray(node.children)) {
+                    node.children.forEach(child => scanNode(child));
+                }
+            }
+            
+            if (hierarchy?.root) {
+                console.log('🔍 Scanning hierarchy root for stages...');
+                scanNode(hierarchy.root);
+            }
+            
+            return Array.from(stages);
         }
         
         function toggleStageFilter(stage, toggleElement) {
@@ -4163,23 +4257,33 @@ except Exception as e:
         
         function updateFilterSummary() {
             const activeStages = Array.from(document.querySelectorAll('.stage-toggle.active')).map(t => t.textContent);
-            const minPriority = parseInt(document.getElementById('prioritySlider').value);
+            const allStages = document.querySelectorAll('.stage-toggle');
+            const prioritySlider = document.getElementById('prioritySlider');
+            const minPriority = prioritySlider ? parseInt(prioritySlider.value) : 0;
             const priorityLabels = ['Normal', 'High', 'Urgent', 'Critical'];
             
             const summary = document.getElementById('filterSummary');
+            if (!summary) {
+                console.warn('⚠️ Filter summary element not found');
+                return;
+            }
+            
             let text = '';
+            
+            console.log(`📊 Updating filter summary: ${activeStages.length}/${allStages.length} stages active`);
             
             if (activeStages.length === 0) {
                 text += 'No stages selected';
-            } else if (activeStages.length === document.querySelectorAll('.stage-toggle').length) {
+            } else if (activeStages.length === allStages.length) {
                 text += 'All stages';
             } else {
                 text += `Stages: ${activeStages.join(', ')}`;
             }
             
-            text += ` | Priority: ${priorityLabels[minPriority]}+`;
+            text += ` | Priority: ${priorityLabels[minPriority] || 'Normal'}+`;
             
             summary.textContent = text;
+            console.log(`📊 Filter summary updated: "${text}"`);
         }
         
         function saveFilterState() {
@@ -4198,7 +4302,7 @@ except Exception as e:
         
         function applySavedFilters() {
             if (!window.currentHierarchy) {
-                console.log('No current hierarchy, skipping saved filters');
+                console.log('📋 No current hierarchy, skipping saved filters');
                 return;
             }
             
@@ -4207,10 +4311,13 @@ except Exception as e:
             
             const saved = localStorage.getItem(`hierarchy_filters_${hierarchyType}_${hierarchyId}`);
             if (!saved) {
-                console.log('No saved filters found, using defaults (all stages active)');
+                console.log('📋 No saved filters found, using defaults (all stages active)');
                 // Ensure all stages are active by default
-                document.querySelectorAll('.stage-toggle').forEach(toggle => {
+                const stageToggles = document.querySelectorAll('.stage-toggle');
+                console.log(`📋 Found ${stageToggles.length} stage toggles to activate`);
+                stageToggles.forEach(toggle => {
                     toggle.classList.add('active');
+                    console.log(`  ✅ Activated stage: ${toggle.dataset.stage}`);
                 });
                 applyFilters();
                 updateFilterSummary();
@@ -4219,29 +4326,41 @@ except Exception as e:
             
             try {
                 const state = JSON.parse(saved);
-                console.log('Applying saved filter state:', state);
+                console.log('📋 Applying saved filter state:', state);
                 
                 // Apply stage filters
-                document.querySelectorAll('.stage-toggle').forEach(toggle => {
-                    if (state.stages.includes(toggle.dataset.stage)) {
+                const stageToggles = document.querySelectorAll('.stage-toggle');
+                console.log(`📋 Found ${stageToggles.length} stage toggles to configure`);
+                stageToggles.forEach(toggle => {
+                    const stage = toggle.dataset.stage;
+                    if (state.stages && state.stages.includes(stage)) {
                         toggle.classList.add('active');
+                        console.log(`  ✅ Activated saved stage: ${stage}`);
                     } else {
                         toggle.classList.remove('active');
+                        console.log(`  ❌ Deactivated stage: ${stage}`);
                     }
                 });
                 
                 // Apply priority filter
-                document.getElementById('prioritySlider').value = state.priority || 0;
-                updatePriorityLabel(state.priority || 0);
+                const prioritySlider = document.getElementById('prioritySlider');
+                if (prioritySlider) {
+                    prioritySlider.value = state.priority || 0;
+                    updatePriorityLabel(state.priority || 0);
+                    console.log(`📋 Set priority filter to: ${state.priority || 0}`);
+                }
                 
                 // Apply filters
                 applyFilters();
                 updateFilterSummary();
             } catch (e) {
-                console.warn('Failed to load saved filter state:', e);
+                console.warn('⚠️ Failed to load saved filter state:', e);
                 // Fallback to showing all stages
-                document.querySelectorAll('.stage-toggle').forEach(toggle => {
+                const stageToggles = document.querySelectorAll('.stage-toggle');
+                console.log(`📋 Fallback: activating all ${stageToggles.length} stage toggles`);
+                stageToggles.forEach(toggle => {
                     toggle.classList.add('active');
+                    console.log(`  ✅ Fallback activated stage: ${toggle.dataset.stage}`);
                 });
                 applyFilters();
                 updateFilterSummary();
