@@ -34,6 +34,7 @@ import sys
 import secrets
 import hashlib
 import logging
+import re
 from datetime import datetime
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs, unquote
