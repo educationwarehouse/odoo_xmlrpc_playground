@@ -3446,6 +3446,26 @@ except Exception as e:
             }
         }
         
+        // Debug function to inspect hierarchy data
+        function debugHierarchy(hierarchy) {
+            console.log('=== HIERARCHY DEBUG ===');
+            console.log('Full hierarchy object:', hierarchy);
+            console.log('Type:', hierarchy?.type);
+            console.log('Root exists:', !!hierarchy?.root);
+            if (hierarchy?.root) {
+                console.log('Root name:', hierarchy.root.name);
+                console.log('Root type:', hierarchy.root.type);
+                console.log('Root children exists:', !!hierarchy.root.children);
+                console.log('Root children is array:', Array.isArray(hierarchy.root.children));
+                console.log('Root children length:', hierarchy.root.children?.length || 0);
+                if (hierarchy.root.children && hierarchy.root.children.length > 0) {
+                    console.log('First child:', hierarchy.root.children[0]);
+                }
+            }
+            console.log('Filter data:', hierarchy?.filter_data);
+            console.log('=== END DEBUG ===');
+        }
+
         // Hierarchy functionality
         function viewHierarchy(type, id) {
             // Switch to hierarchy tab
@@ -3564,13 +3584,16 @@ except Exception as e:
             fetch(`/api/hierarchy/${type}/${id}`)
                 .then(response => response.json())
                 .then(data => {
+                    console.log('Hierarchy API response:', data);
                     if (data.success) {
+                        debugHierarchy(data.hierarchy);
                         displayHierarchy(data.hierarchy);
                     } else {
                         container.innerHTML = '<div class="error">Error: ' + (data.error || 'Failed to load hierarchy') + '</div>';
                     }
                 })
                 .catch(error => {
+                    console.error('Hierarchy load error:', error);
                     container.innerHTML = '<div class="error">Error: ' + error.message + '</div>';
                 });
         }
@@ -3582,6 +3605,12 @@ except Exception as e:
             console.log('Displaying hierarchy:', hierarchy);
             console.log('Hierarchy type:', hierarchy.type);
             console.log('Root node:', hierarchy.root);
+            
+            if (!hierarchy || !hierarchy.root) {
+                console.error('Invalid hierarchy data:', hierarchy);
+                container.innerHTML = '<div class="error">Invalid hierarchy data received</div>';
+                return;
+            }
             
             // Store hierarchy globally for filtering and drag & drop
             window.currentHierarchy = hierarchy;
@@ -3605,16 +3634,19 @@ except Exception as e:
             
             // Render tree
             html += '<div class="tree-view" id="treeView">';
-            if (hierarchy.root) {
-                console.log('Rendering root node:', hierarchy.root.name);
-                html += renderTreeNode(hierarchy.root, 0, true);
+            console.log('About to render root node:', hierarchy.root.name, 'with children:', hierarchy.root.children?.length || 0);
+            const rootHtml = renderTreeNode(hierarchy.root, 0, true);
+            if (rootHtml) {
+                html += rootHtml;
+                console.log('Root node rendered successfully');
             } else {
-                console.error('No root node found in hierarchy');
-                html += '<div class="error">No hierarchy data found</div>';
+                console.error('Root node failed to render');
+                html += '<div class="error">Failed to render hierarchy tree</div>';
             }
             html += '</div>';
             
             console.log('Generated HTML length:', html.length);
+            console.log('Generated HTML preview:', html.substring(0, 500) + '...');
             container.innerHTML = html;
             
             // Setup drag & drop
@@ -3632,7 +3664,7 @@ except Exception as e:
             
             console.log('Rendering node:', node.name, 'Type:', node.type, 'Children:', node.children?.length || 0);
             
-            const hasChildren = node.children && node.children.length > 0;
+            const hasChildren = node.children && Array.isArray(node.children) && node.children.length > 0;
             const nodeId = `node-${node.type}-${node.id}`;
             const isDraggable = node.type === 'task' && !isRoot;
             
@@ -3711,12 +3743,21 @@ except Exception as e:
                 html += '<div class="tree-children" id="children-' + nodeId + '">';
                 console.log(`Rendering ${node.children.length} children for ${node.name}`);
                 node.children.forEach((child, index) => {
-                    console.log(`  Child ${index + 1}:`, child.name, 'Type:', child.type);
-                    html += renderTreeNode(child, depth + 1);
+                    if (child && typeof child === 'object') {
+                        console.log(`  Child ${index + 1}:`, child.name || 'Unnamed', 'Type:', child.type || 'Unknown');
+                        const childHtml = renderTreeNode(child, depth + 1);
+                        if (childHtml) {
+                            html += childHtml;
+                        } else {
+                            console.warn(`  Child ${index + 1} rendered empty HTML`);
+                        }
+                    } else {
+                        console.warn(`  Child ${index + 1} is invalid:`, child);
+                    }
                 });
                 html += '</div>';
             } else {
-                console.log(`No children for ${node.name}`);
+                console.log(`No children for ${node.name} (hasChildren: ${hasChildren}, children:`, node.children, ')');
             }
             
             html += '</div>';
