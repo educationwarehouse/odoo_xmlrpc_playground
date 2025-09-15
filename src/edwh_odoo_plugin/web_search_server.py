@@ -135,6 +135,11 @@ class WebSearchHandler(BaseHTTPRequestHandler):
             
             # Log search request to console
             print(f"🔍 Web search request [{search_id[:8]}]: '{search_term}' (type: {search_type}, since: {since})")
+            print(f"   Parameters: descriptions={include_descriptions}, logs={include_logs}, files={include_files}")
+            if file_types:
+                print(f"   File types: {file_types}")
+            if limit:
+                print(f"   Limit: {limit}")
 
             # Start background search process
             search_thread = threading.Thread(
@@ -181,6 +186,10 @@ class WebSearchHandler(BaseHTTPRequestHandler):
                                file_types, limit):
         """Execute search in a separate Python process"""
         try:
+            print(f"🔍 Starting search process [{search_id[:8]}]: '{search_term}'")
+            print(f"   Search type: {search_type}, Include descriptions: {include_descriptions}")
+            print(f"   Include logs: {include_logs}, Include files: {include_files}")
+            
             # Create temporary files for communication
             with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as input_file:
                 input_data = {
@@ -459,7 +468,15 @@ except Exception as e:
             ]
             
             # Run the process
+            print(f"⚙️  Executing search subprocess [{search_id[:8]}]...")
             process = subprocess.run(cmd, capture_output=True, text=True, timeout=300, cwd=os.getcwd())  # 5 minute timeout
+            
+            print(f"📊 Search subprocess completed [{search_id[:8]}]:")
+            print(f"   Return code: {process.returncode}")
+            if process.stdout:
+                print(f"   Stdout preview: {process.stdout[:200]}...")
+            if process.stderr:
+                print(f"   Stderr preview: {process.stderr[:200]}...")
             
             # Read results
             try:
@@ -540,12 +557,29 @@ except Exception as e:
                 
                 search_info = WebSearchHandler._active_searches[search_id]
                 
+                elapsed = time.time() - search_info['started_at']
                 response = {
                     'search_id': search_id,
                     'status': search_info['status'],
                     'search_term': search_info['search_term'],
-                    'started_at': search_info['started_at']
+                    'started_at': search_info['started_at'],
+                    'elapsed': elapsed
                 }
+                
+                # Add progress estimation for running searches
+                if search_info['status'] == 'running':
+                    if elapsed < 10:
+                        response['progress_message'] = f"🔄 Initializing search... ({elapsed:.0f}s)"
+                    elif elapsed < 20:
+                        response['progress_message'] = f"📂 Searching projects... ({elapsed:.0f}s)"
+                    elif elapsed < 35:
+                        response['progress_message'] = f"📋 Searching tasks... ({elapsed:.0f}s)"
+                    elif elapsed < 50:
+                        response['progress_message'] = f"💬 Searching messages... ({elapsed:.0f}s)"
+                    elif elapsed < 70:
+                        response['progress_message'] = f"📁 Searching files... ({elapsed:.0f}s)"
+                    else:
+                        response['progress_message'] = f"🔧 Processing results... ({elapsed:.0f}s)"
                 
                 if search_info['status'] in ['completed', 'error', 'timeout']:
                     response['completed_at'] = search_info.get('completed_at')
@@ -1387,6 +1421,68 @@ except Exception as e:
             40% {
                 opacity: 1;
             }
+        }
+        
+        .progress-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 15px;
+        }
+        
+        .progress-step {
+            font-weight: 600;
+            font-size: 1.1rem;
+            color: var(--accent-color);
+        }
+        
+        .progress-time {
+            font-size: 0.9rem;
+            color: #666;
+            font-family: monospace;
+        }
+        
+        [data-theme="dark"] .progress-time {
+            color: #aaa;
+        }
+        
+        .progress-bar-container {
+            width: 100%;
+            height: 8px;
+            background: var(--border-color);
+            border-radius: 4px;
+            overflow: hidden;
+            margin-bottom: 10px;
+        }
+        
+        .progress-bar {
+            height: 100%;
+            background: linear-gradient(90deg, var(--accent-color), var(--success-color));
+            border-radius: 4px;
+            transition: width 0.5s ease;
+            animation: pulse 2s infinite;
+        }
+        
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.7; }
+        }
+        
+        .progress-description {
+            font-size: 0.9rem;
+            color: #666;
+            margin-bottom: 8px;
+            font-style: italic;
+        }
+        
+        [data-theme="dark"] .progress-description {
+            color: #aaa;
+        }
+        
+        .progress-message {
+            font-size: 0.85rem;
+            color: var(--text-color);
+            margin-bottom: 10px;
         }
         
         .results {
@@ -2811,10 +2907,37 @@ except Exception as e:
                 });
         }
         
-        function showSearchProgress(message) {
+        function showSearchProgress(message, elapsed = 0) {
+            const progressSteps = [
+                { time: 0, step: "🔄 Initializing search...", desc: "Setting up search parameters" },
+                { time: 5, step: "📂 Searching projects...", desc: "Looking through project names and descriptions" },
+                { time: 15, step: "📋 Searching tasks...", desc: "Scanning task titles and content" },
+                { time: 30, step: "💬 Searching messages...", desc: "Examining log messages and comments" },
+                { time: 45, step: "📁 Searching files...", desc: "Checking file names and metadata" },
+                { time: 60, step: "🔧 Processing results...", desc: "Organizing and enriching data" }
+            ];
+            
+            let currentStep = progressSteps[0];
+            for (let i = progressSteps.length - 1; i >= 0; i--) {
+                if (elapsed >= progressSteps[i].time) {
+                    currentStep = progressSteps[i];
+                    break;
+                }
+            }
+            
+            const progressPercent = Math.min(90, (elapsed / 90) * 100); // Cap at 90% until complete
+            
             document.getElementById('results').innerHTML = `
                 <div class="loading">
-                    ${message}
+                    <div class="progress-header">
+                        <div class="progress-step">${currentStep.step}</div>
+                        <div class="progress-time">⏱️ ${elapsed}s</div>
+                    </div>
+                    <div class="progress-bar-container">
+                        <div class="progress-bar" style="width: ${progressPercent}%"></div>
+                    </div>
+                    <div class="progress-description">${currentStep.desc}</div>
+                    <div class="progress-message">${message}</div>
                     <div class="progress-dots">
                         <span>.</span><span>.</span><span>.</span>
                     </div>
@@ -2832,7 +2955,8 @@ except Exception as e:
                         const elapsed = Math.round((Date.now() - startTime) / 1000);
                         
                         if (data.status === 'running') {
-                            showSearchProgress(`Searching... (${elapsed}s)`);
+                            const progressMessage = data.progress_message || `Searching... (${elapsed}s)`;
+                            showSearchProgress(progressMessage, elapsed);
                             // Continue polling
                             setTimeout(checkStatus, 1000);
                         } else if (data.status === 'completed') {
@@ -3455,6 +3579,10 @@ except Exception as e:
             const container = document.getElementById('hierarchyContainer');
             const filtersContainer = document.getElementById('hierarchyFilters');
             
+            console.log('Displaying hierarchy:', hierarchy);
+            console.log('Hierarchy type:', hierarchy.type);
+            console.log('Root node:', hierarchy.root);
+            
             // Store hierarchy globally for filtering and drag & drop
             window.currentHierarchy = hierarchy;
             
@@ -3477,9 +3605,16 @@ except Exception as e:
             
             // Render tree
             html += '<div class="tree-view" id="treeView">';
-            html += renderTreeNode(hierarchy.root, 0, true);
+            if (hierarchy.root) {
+                console.log('Rendering root node:', hierarchy.root.name);
+                html += renderTreeNode(hierarchy.root, 0, true);
+            } else {
+                console.error('No root node found in hierarchy');
+                html += '<div class="error">No hierarchy data found</div>';
+            }
             html += '</div>';
             
+            console.log('Generated HTML length:', html.length);
             container.innerHTML = html;
             
             // Setup drag & drop
@@ -3490,7 +3625,12 @@ except Exception as e:
         }
         
         function renderTreeNode(node, depth, isRoot = false) {
-            if (!node) return '';
+            if (!node) {
+                console.warn('renderTreeNode called with null/undefined node');
+                return '';
+            }
+            
+            console.log('Rendering node:', node.name, 'Type:', node.type, 'Children:', node.children?.length || 0);
             
             const hasChildren = node.children && node.children.length > 0;
             const nodeId = `node-${node.type}-${node.id}`;
@@ -3569,10 +3709,14 @@ except Exception as e:
             // Children
             if (hasChildren) {
                 html += '<div class="tree-children" id="children-' + nodeId + '">';
-                node.children.forEach(child => {
+                console.log(`Rendering ${node.children.length} children for ${node.name}`);
+                node.children.forEach((child, index) => {
+                    console.log(`  Child ${index + 1}:`, child.name, 'Type:', child.type);
                     html += renderTreeNode(child, depth + 1);
                 });
                 html += '</div>';
+            } else {
+                console.log(`No children for ${node.name}`);
             }
             
             html += '</div>';
