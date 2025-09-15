@@ -706,7 +706,13 @@ class TaskManager(OdooBase):
 
             # Depth-limited recursive assembly using in-memory index
             def build_node(task, depth):
-                node = self._task_to_dict(task)
+                # Performance: build a lightweight node during assembly to avoid
+                # triggering relational dereferencing and extra RPCs. Full details
+                # (user, stage, etc.) can be resolved on-demand at print time.
+                node = {
+                    'id': task.id,
+                    'name': getattr(task, 'name', f'Task {task.id}'),
+                }
                 if depth >= depth_limit:
                     node['children'] = []
                     return node
@@ -787,7 +793,22 @@ class TaskManager(OdooBase):
             print(f"│  📊 Summary: {hierarchy['total_tasks']} tasks ({hierarchy['main_task_count']} main, {hierarchy['total_tasks'] - hierarchy['main_task_count']} subtasks)")
         else:
             print(f"│  📊 {hierarchy['total_tasks']} tasks ({hierarchy['main_task_count']} main, {hierarchy['total_tasks'] - hierarchy['main_task_count']} subtasks)")
-        
+
+        # Print timing information if available
+        timings = hierarchy.get('timings') or {}
+        if timings:
+            if self.verbosity_level >= 2:
+                print("│  ⏱ Timings:")
+                print(f"│    • Project fetch: {timings.get('project_fetch_ms', '?')} ms")
+                print(f"│    • Tasks fetch:   {timings.get('tasks_fetch_ms', '?')} ms")
+                print(f"│    • Index build:   {timings.get('index_build_ms', '?')} ms")
+                print(f"│    • Assembly:      {timings.get('assembly_ms', '?')} ms")
+                print(f"│    • Total:         {timings.get('total_ms', '?')} ms")
+            else:
+                total = timings.get('total_ms')
+                if total is not None:
+                    print(f"│  ⏱ Total time: {total} ms")
+
         # Print main tasks and their hierarchies as part of the project tree
         if hierarchy['main_tasks']:
             for i, main_task in enumerate(hierarchy['main_tasks']):

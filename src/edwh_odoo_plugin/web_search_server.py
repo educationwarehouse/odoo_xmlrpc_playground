@@ -1675,6 +1675,19 @@ except Exception as e:
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <!-- Disable verbose console logging by default to reduce memory usage. Enable by setting localStorage.EDWH_DEBUG='1'. -->
+    <script>
+      (function(){
+        try {
+          var dbg = (typeof window !== 'undefined') && (window.localStorage && window.localStorage.getItem('EDWH_DEBUG') === '1');
+          if (!dbg && typeof console !== 'undefined') {
+            console.log = function(){};
+          }
+        } catch(e) {
+          if (typeof console !== 'undefined') { console.log = function(){}; }
+        }
+      })();
+    </script>
     <title>Odoo Search</title>
     <style>
         :root {
