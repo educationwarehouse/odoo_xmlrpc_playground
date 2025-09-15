@@ -4,7 +4,7 @@
 
 ## v0.2.1 (2025-09-03)
 
-
+* fixed config settings to use the new location for the web as well. 
 
 ## v0.2.0 (2025-09-03)
 
