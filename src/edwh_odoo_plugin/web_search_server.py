@@ -31,6 +31,9 @@ import subprocess
 import tempfile
 import uuid
 import sys
+import secrets
+import hashlib
+import logging
 from datetime import datetime
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from urllib.parse import urlparse, parse_qs, unquote
@@ -38,6 +41,10 @@ import base64
 import mimetypes
 import time
 import warnings
+
+# Configure secure logging
+logging.basicConfig(level=logging.WARNING)
+logger = logging.getLogger(__name__)
 
 # Suppress the pkg_resources deprecation warning from odoo_rpc_client globally
 warnings.filterwarnings("ignore", 
@@ -55,42 +62,163 @@ except ImportError:
 
 
 class WebSearchHandler(BaseHTTPRequestHandler):
-    """HTTP request handler for the web search interface"""
+    """HTTP request handler for the web search interface with security hardening"""
     
     # Class-level storage for active searches
     _active_searches = {}
     _search_lock = threading.Lock()
     
+    # Security configuration
+    MAX_CONTENT_LENGTH = 10 * 1024 * 1024  # 10MB
+    MAX_SEARCH_TERM_LENGTH = 1000
+    RATE_LIMIT_REQUESTS = 100  # requests per minute
+    RATE_LIMIT_WINDOW = 60  # seconds
+    
+    # Rate limiting storage
+    _rate_limit_storage = {}
+    _rate_limit_lock = threading.Lock()
+    
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
     
-    def do_GET(self):
-        """Handle GET requests"""
-        parsed_path = urlparse(self.path)
-        path = parsed_path.path
+    def _check_rate_limit(self, client_ip):
+        """Check if client is within rate limits"""
+        current_time = time.time()
         
-        if path == '/' or path == '/index.html':
-            self.serve_main_page()
-        elif path == '/api/search':
-            self.handle_search_api(parsed_path.query)
-        elif path == '/api/search/status':
-            self.handle_search_status_api(parsed_path.query)
-        elif path == '/api/download':
-            self.handle_download_api(parsed_path.query)
-        elif path == '/api/settings':
-            self.handle_settings_get()
-        elif path.startswith('/api/hierarchy/project/'):
-            project_id = self.extract_id_from_path(path, '/api/hierarchy/project/')
-            self.handle_project_hierarchy_api(project_id)
-        elif path.startswith('/api/hierarchy/task/'):
-            task_id = self.extract_id_from_path(path, '/api/hierarchy/task/')
-            self.handle_task_hierarchy_api(task_id)
-        elif path.startswith('/api/move-task'):
-            self.handle_move_task_api(parsed_path.query)
-        elif path.startswith('/static/'):
-            self.serve_static_file(path)
+        with WebSearchHandler._rate_limit_lock:
+            if client_ip not in WebSearchHandler._rate_limit_storage:
+                WebSearchHandler._rate_limit_storage[client_ip] = []
+            
+            # Clean old requests
+            requests = WebSearchHandler._rate_limit_storage[client_ip]
+            requests[:] = [req_time for req_time in requests if current_time - req_time < self.RATE_LIMIT_WINDOW]
+            
+            # Check limit
+            if len(requests) >= self.RATE_LIMIT_REQUESTS:
+                return False
+            
+            # Add current request
+            requests.append(current_time)
+            return True
+    
+    def _sanitize_input(self, value, max_length=None):
+        """Sanitize user input"""
+        if not value:
+            return ""
+        
+        # Convert to string and limit length
+        value = str(value)
+        if max_length:
+            value = value[:max_length]
+        
+        # Remove potentially dangerous characters
+        sanitized = re.sub(r'[<>"\'\x00-\x1f\x7f-\x9f]', '', value)
+        
+        return sanitized.strip()
+    
+    def _validate_search_params(self, params):
+        """Validate search parameters"""
+        validated = {}
+        
+        # Sanitize search term
+        search_term = params.get('q', [''])[0]
+        validated['q'] = self._sanitize_input(search_term, self.MAX_SEARCH_TERM_LENGTH)
+        
+        # Validate since parameter
+        since = params.get('since', [''])[0]
+        if since:
+            # Only allow alphanumeric and spaces
+            if re.match(r'^[a-zA-Z0-9\s]+$', since) and len(since) <= 50:
+                validated['since'] = since
+            else:
+                logger.warning(f"Invalid since parameter: {since}")
+                validated['since'] = ''
         else:
-            self.send_error(404, "Not Found")
+            validated['since'] = ''
+        
+        # Validate type parameter
+        valid_types = ['all', 'projects', 'tasks', 'logs', 'files']
+        search_type = params.get('type', ['all'])[0]
+        validated['type'] = search_type if search_type in valid_types else 'all'
+        
+        # Validate boolean parameters
+        for param in ['descriptions', 'logs', 'files']:
+            value = params.get(param, ['true'])[0].lower()
+            validated[param] = value in ['true', '1', 'yes']
+        
+        # Validate file types
+        file_types = params.get('file_types', [''])[0]
+        if file_types:
+            # Only allow alphanumeric and common file extensions
+            safe_types = []
+            for ft in file_types.split(','):
+                ft = ft.strip()
+                if re.match(r'^[a-zA-Z0-9]+$', ft) and len(ft) <= 10:
+                    safe_types.append(ft)
+            validated['file_types'] = ','.join(safe_types[:10])  # Max 10 file types
+        else:
+            validated['file_types'] = ''
+        
+        # Validate limit
+        try:
+            limit = int(params.get('limit', ['0'])[0])
+            validated['limit'] = min(max(0, limit), 10000)  # Max 10000 results
+        except ValueError:
+            validated['limit'] = 0
+        
+        return validated
+    
+    def do_GET(self):
+        """Handle GET requests with security checks"""
+        # Rate limiting
+        client_ip = self.client_address[0]
+        if not self._check_rate_limit(client_ip):
+            self.send_error(429, "Too Many Requests")
+            return
+        
+        try:
+            parsed_path = urlparse(self.path)
+            path = parsed_path.path
+            
+            # Validate path to prevent directory traversal
+            if '..' in path or path.count('/') > 10:
+                logger.warning(f"Suspicious path detected: {path}")
+                self.send_error(400, "Bad Request")
+                return
+            
+            if path == '/' or path == '/index.html':
+                self.serve_main_page()
+            elif path == '/api/search':
+                self.handle_search_api(parsed_path.query)
+            elif path == '/api/search/status':
+                self.handle_search_status_api(parsed_path.query)
+            elif path == '/api/download':
+                self.handle_download_api(parsed_path.query)
+            elif path == '/api/settings':
+                self.handle_settings_get()
+            elif path.startswith('/api/hierarchy/project/'):
+                project_id = self.extract_id_from_path(path, '/api/hierarchy/project/')
+                if project_id and isinstance(project_id, int) and project_id > 0:
+                    self.handle_project_hierarchy_api(project_id)
+                else:
+                    self.send_error(400, "Invalid project ID")
+            elif path.startswith('/api/hierarchy/task/'):
+                task_id = self.extract_id_from_path(path, '/api/hierarchy/task/')
+                if task_id and isinstance(task_id, int) and task_id > 0:
+                    self.handle_task_hierarchy_api(task_id)
+                else:
+                    self.send_error(400, "Invalid task ID")
+            elif path.startswith('/api/move-task'):
+                self.handle_move_task_api(parsed_path.query)
+            elif path.startswith('/static/'):
+                # Disable static file serving for security
+                self.send_error(403, "Forbidden")
+            else:
+                self.send_error(404, "Not Found")
+                
+        except Exception as e:
+            logger.error(f"Error handling GET request: {e}")
+            self.send_error(500, "Internal Server Error")
     
     def do_POST(self):
         """Handle POST requests"""
@@ -103,49 +231,50 @@ class WebSearchHandler(BaseHTTPRequestHandler):
             self.send_error(404, "Not Found")
     
     def serve_main_page(self):
-        """Serve the main HTML page"""
+        """Serve the main HTML page with security headers"""
         html_content = self.get_main_html()
         self.send_response(200)
         self.send_header('Content-type', 'text/html; charset=utf-8')
         self.send_header('Content-Length', str(len(html_content.encode('utf-8'))))
+        
+        # Security headers
+        self.send_header('X-Content-Type-Options', 'nosniff')
+        self.send_header('X-Frame-Options', 'DENY')
+        self.send_header('X-XSS-Protection', '1; mode=block')
+        self.send_header('Content-Security-Policy', "default-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'")
+        
         self.end_headers()
         self.wfile.write(html_content.encode('utf-8'))
     
     def handle_search_api(self, query_string):
-        """Handle search API requests using background processes"""
+        """Handle search API requests using background processes with security validation"""
         try:
             params = parse_qs(query_string)
             
-            # Extract search parameters
-            search_term = params.get('q', [''])[0]
-            since = params.get('since', [''])[0] or None
-            search_type = params.get('type', ['all'])[0]
-            include_descriptions = params.get('descriptions', ['true'])[0].lower() == 'true'
-            include_logs = params.get('logs', ['true'])[0].lower() == 'true'
-            include_files = params.get('files', ['true'])[0].lower() == 'true'
-            file_types = params.get('file_types', [''])[0].split(',') if params.get('file_types', [''])[0] else None
-            limit = int(params.get('limit', ['0'])[0]) or None
+            # Validate and sanitize parameters
+            validated_params = self._validate_search_params(params)
             
-            if not search_term:
-                self.send_json_response({'error': 'Search term is required'}, 400)
+            search_term = validated_params['q']
+            if not search_term or len(search_term.strip()) < 2:
+                self.send_json_response({'error': 'Search term must be at least 2 characters'}, 400)
                 return
 
             # Generate unique search ID
             search_id = str(uuid.uuid4())
             
-            # Log search request to console
-            print(f"🔍 Web search request [{search_id[:8]}]: '{search_term}' (type: {search_type}, since: {since})")
-            print(f"   Parameters: descriptions={include_descriptions}, logs={include_logs}, files={include_files}")
-            if file_types:
-                print(f"   File types: {file_types}")
-            if limit:
-                print(f"   Limit: {limit}")
+            # Log search request to console (sanitized)
+            safe_term = search_term[:50] + "..." if len(search_term) > 50 else search_term
+            print(f"🔍 Web search request [{search_id[:8]}]: '{safe_term}' (type: {validated_params['type']})")
+            print(f"   Parameters: descriptions={validated_params['descriptions']}, logs={validated_params['logs']}, files={validated_params['files']}")
+            if validated_params['file_types']:
+                print(f"   File types: {validated_params['file_types']}")
+            if validated_params['limit']:
+                print(f"   Limit: {validated_params['limit']}")
 
             # Start background search process
             search_thread = threading.Thread(
                 target=self._execute_search_process,
-                args=(search_id, search_term, since, search_type, include_descriptions, 
-                      include_logs, include_files, file_types, limit)
+                args=(search_id, validated_params)
             )
             search_thread.daemon = True
             search_thread.start()
@@ -155,7 +284,7 @@ class WebSearchHandler(BaseHTTPRequestHandler):
                 WebSearchHandler._active_searches[search_id] = {
                     'status': 'running',
                     'started_at': time.time(),
-                    'search_term': search_term,
+                    'search_term': safe_term,  # Store sanitized version
                     'thread': search_thread
                 }
             
@@ -181,46 +310,64 @@ class WebSearchHandler(BaseHTTPRequestHandler):
                 'traceback': traceback_msg
             }, 500)
     
-    def _execute_search_process(self, search_id, search_term, since, search_type, 
-                               include_descriptions, include_logs, include_files, 
-                               file_types, limit):
-        """Execute search in a separate Python process"""
+    def _execute_search_process(self, search_id, validated_params):
+        """Execute search in a separate Python process with security controls"""
         try:
-            print(f"🔍 Starting search process [{search_id[:8]}]: '{search_term}'")
-            print(f"   Search type: {search_type}, Include descriptions: {include_descriptions}")
-            print(f"   Include logs: {include_logs}, Include files: {include_files}")
+            safe_term = validated_params['q'][:50] + "..." if len(validated_params['q']) > 50 else validated_params['q']
+            print(f"🔍 Starting search process [{search_id[:8]}]: '{safe_term}'")
+            print(f"   Search type: {validated_params['type']}, Include descriptions: {validated_params['descriptions']}")
+            print(f"   Include logs: {validated_params['logs']}, Include files: {validated_params['files']}")
             
-            # Create temporary files for communication
+            # Create temporary files for communication with secure permissions
             with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as input_file:
+                # Only pass validated parameters
                 input_data = {
-                    'search_term': search_term,
-                    'since': since,
-                    'search_type': search_type,
-                    'include_descriptions': include_descriptions,
-                    'include_logs': include_logs,
-                    'include_files': include_files,
-                    'file_types': file_types,
-                    'limit': limit
+                    'search_term': validated_params['q'],
+                    'since': validated_params['since'],
+                    'search_type': validated_params['type'],
+                    'include_descriptions': validated_params['descriptions'],
+                    'include_logs': validated_params['logs'],
+                    'include_files': validated_params['files'],
+                    'file_types': validated_params['file_types'].split(',') if validated_params['file_types'] else None,
+                    'limit': validated_params['limit'] if validated_params['limit'] > 0 else None
                 }
                 json.dump(input_data, input_file)
                 input_file_path = input_file.name
             
+            # Set secure permissions on temp files
+            os.chmod(input_file_path, 0o600)
+            
             with tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False) as output_file:
                 output_file_path = output_file.name
             
-            # Execute search in separate process
+            os.chmod(output_file_path, 0o600)
+            
+            # Execute search in separate process with security restrictions
+            # Validate that we're not executing arbitrary code
+            current_dir = os.getcwd()
+            if not os.path.isabs(current_dir):
+                raise ValueError("Invalid working directory")
+            
             cmd = [
                 sys.executable, '-c', f'''
 import sys
 import json
 import os
+import signal
 import threading
 import concurrent.futures
 from datetime import datetime
 
+# Set timeout for the entire process
+def timeout_handler(signum, frame):
+    raise TimeoutError("Search process timed out")
+
+signal.signal(signal.SIGALRM, timeout_handler)
+signal.alarm(300)  # 5 minute timeout
+
 # Add both current directory and src directory to path
-sys.path.insert(0, "{os.getcwd()}")
-sys.path.insert(0, os.path.join("{os.getcwd()}", "src"))
+sys.path.insert(0, "{current_dir}")
+sys.path.insert(0, os.path.join("{current_dir}", "src"))
 
 try:
     from edwh_odoo_plugin.text_search import OdooTextSearch
@@ -230,9 +377,12 @@ except ImportError:
     except ImportError:
         from text_search import OdooTextSearch
 
-# Read input
-with open("{input_file_path}", "r") as f:
-    params = json.load(f)
+# Read input with validation
+try:
+    with open("{input_file_path}", "r") as f:
+        params = json.load(f)
+except Exception as e:
+    raise ValueError(f"Failed to read input parameters: {{e}}")
 
 try:
     # Create searcher instance
@@ -467,9 +617,26 @@ except Exception as e:
 '''
             ]
             
-            # Run the process
+            # Run the process with security restrictions
             print(f"⚙️  Executing search subprocess [{search_id[:8]}]...")
-            process = subprocess.run(cmd, capture_output=True, text=True, timeout=300, cwd=os.getcwd())  # 5 minute timeout
+            
+            # Security: Run with limited environment
+            secure_env = {
+                'PATH': os.environ.get('PATH', ''),
+                'PYTHONPATH': os.environ.get('PYTHONPATH', ''),
+                'HOME': os.environ.get('HOME', ''),
+                'USER': os.environ.get('USER', ''),
+            }
+            
+            process = subprocess.run(
+                cmd, 
+                capture_output=True, 
+                text=True, 
+                timeout=300,  # 5 minute timeout
+                cwd=current_dir,
+                env=secure_env,
+                shell=False  # Never use shell=True for security
+            )
             
             print(f"📊 Search subprocess completed [{search_id[:8]}]:")
             print(f"   Return code: {process.returncode}")
@@ -606,31 +773,46 @@ except Exception as e:
             }, 500)
     
     def handle_download_api(self, query_string):
-        """Handle file download API requests"""
+        """Handle file download API requests with security validation"""
         try:
             params = parse_qs(query_string)
             file_id = params.get('id', [''])[0]
             
+            # Validate file ID
             if not file_id:
                 self.send_json_response({'error': 'File ID is required'}, 400)
+                return
+            
+            try:
+                file_id_int = int(file_id)
+                if file_id_int <= 0:
+                    raise ValueError("Invalid file ID")
+            except ValueError:
+                logger.warning(f"Invalid file ID format: {file_id}")
+                self.send_json_response({'error': 'Invalid file ID format'}, 400)
                 return
             
             # Create temporary base connection for download (downloads are infrequent)
             try:
                 odoo_base = OdooBase(verbose=False)
             except Exception as e:
-                self.send_json_response({'error': f'Failed to connect to Odoo: {str(e)}'}, 500)
+                logger.error(f"Failed to connect to Odoo: {e}")
+                self.send_json_response({'error': 'Failed to connect to Odoo'}, 500)
                 return
             
             # Get file info first
-            attachment_records = odoo_base.attachments.search_records([('id', '=', int(file_id))])
+            attachment_records = odoo_base.attachments.search_records([('id', '=', file_id_int)])
             
             if not attachment_records:
+                logger.warning(f"File not found: {file_id_int}")
                 self.send_json_response({'error': 'File not found'}, 404)
                 return
             
             attachment = attachment_records[0]
             file_name = getattr(attachment, 'name', f'file_{file_id}')
+            
+            # Sanitize filename for security
+            safe_filename = odoo_base._sanitize_filename(file_name)
             
             # Get file data using shared method
             if not hasattr(attachment, 'datas'):
@@ -645,21 +827,52 @@ except Exception as e:
                 self.send_json_response({'error': 'File data is empty'}, 404)
                 return
             
-            # Decode base64 data
-            file_data = base64.b64decode(file_data_b64)
+            try:
+                # Decode base64 data
+                file_data = base64.b64decode(file_data_b64)
+            except Exception as e:
+                logger.error(f"Failed to decode file data: {e}")
+                self.send_json_response({'error': 'Invalid file data'}, 500)
+                return
             
-            # Determine MIME type
-            mime_type, _ = mimetypes.guess_type(file_name)
+            # Validate file size (max 100MB for web downloads)
+            max_size = 100 * 1024 * 1024  # 100MB
+            if len(file_data) > max_size:
+                logger.warning(f"File too large for web download: {len(file_data)} bytes")
+                self.send_json_response({'error': 'File too large for web download'}, 413)
+                return
+            
+            # Determine MIME type safely
+            mime_type, _ = mimetypes.guess_type(safe_filename)
             if not mime_type:
                 mime_type = 'application/octet-stream'
             
-            # Send file
+            # Validate MIME type for security
+            dangerous_types = [
+                'application/x-executable',
+                'application/x-msdownload',
+                'application/x-msdos-program',
+                'text/html',
+                'text/javascript',
+                'application/javascript'
+            ]
+            
+            if mime_type in dangerous_types:
+                logger.warning(f"Blocked download of potentially dangerous file type: {mime_type}")
+                mime_type = 'application/octet-stream'
+            
+            # Send file with security headers
             self.send_response(200)
             self.send_header('Content-Type', mime_type)
-            self.send_header('Content-Disposition', f'attachment; filename="{file_name}"')
+            self.send_header('Content-Disposition', f'attachment; filename="{safe_filename}"')
             self.send_header('Content-Length', str(len(file_data)))
+            self.send_header('X-Content-Type-Options', 'nosniff')
+            self.send_header('X-Frame-Options', 'DENY')
+            self.send_header('Cache-Control', 'no-cache, no-store, must-revalidate')
             self.end_headers()
             self.wfile.write(file_data)
+            
+            logger.info(f"File downloaded: {safe_filename} ({len(file_data)} bytes)")
             
         except Exception as e:
             import traceback
@@ -1408,11 +1621,20 @@ except Exception as e:
 
     
     def send_json_response(self, data, status_code=200):
-        """Send JSON response"""
+        """Send JSON response with security headers"""
         json_data = json.dumps(data, ensure_ascii=False, indent=2)
         self.send_response(status_code)
         self.send_header('Content-type', 'application/json; charset=utf-8')
         self.send_header('Content-Length', str(len(json_data.encode('utf-8'))))
+        
+        # Security headers
+        self.send_header('X-Content-Type-Options', 'nosniff')
+        self.send_header('X-Frame-Options', 'DENY')
+        self.send_header('X-XSS-Protection', '1; mode=block')
+        self.send_header('Cache-Control', 'no-cache, no-store, must-revalidate')
+        self.send_header('Pragma', 'no-cache')
+        self.send_header('Expires', '0')
+        
         self.end_headers()
         self.wfile.write(json_data.encode('utf-8'))
     

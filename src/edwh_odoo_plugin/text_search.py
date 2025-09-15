@@ -27,7 +27,11 @@ import csv
 import html
 import base64
 import textwrap
+import logging
 from .odoo_base import OdooBase
+
+# Configure secure logging
+logger = logging.getLogger(__name__)
 
 
 class OdooTextSearch(OdooBase):
@@ -60,41 +64,96 @@ class OdooTextSearch(OdooBase):
         self._user_cache_built = False
         self._project_cache_built = False
         self._message_cache_built = False
+        
+        # Security limits
+        self.max_search_length = 1000
+        self.max_results_per_query = 10000
 
+    def _sanitize_search_term(self, search_term):
+        """Sanitize search term to prevent injection attacks"""
+        if not search_term:
+            return ""
+        
+        # Convert to string and limit length
+        search_term = str(search_term)[:self.max_search_length]
+        
+        # Remove potentially dangerous characters for SQL injection
+        # Keep alphanumeric, spaces, and common punctuation
+        sanitized = re.sub(r'[^\w\s\-.,!?@#$%^&*()+=\[\]{}|;:\'\"<>/\\`~]', '', search_term)
+        
+        # Remove SQL injection patterns
+        sql_patterns = [
+            r'(\b(SELECT|INSERT|UPDATE|DELETE|DROP|CREATE|ALTER|EXEC|UNION|SCRIPT)\b)',
+            r'(--|/\*|\*/)',
+            r'(\bOR\b.*\b=\b)',
+            r'(\bAND\b.*\b=\b)',
+            r'(\'.*\')',
+            r'(;.*)',
+        ]
+        
+        for pattern in sql_patterns:
+            sanitized = re.sub(pattern, '', sanitized, flags=re.IGNORECASE)
+        
+        # Trim whitespace
+        sanitized = sanitized.strip()
+        
+        if len(sanitized) != len(search_term):
+            logger.warning("Search term was sanitized for security")
+        
+        return sanitized
+    
     def _parse_time_reference(self, time_ref):
         """
-        Parse human-readable time references in English and Dutch:
-        English: "1 week", "2 weeks", "3 days", "1 day", "1 month", "2 months", "1 year"
-        Dutch: "1 week", "2 weken", "3 dagen", "1 dag", "1 maand", "2 maanden", "1 jaar"
+        Parse human-readable time references in English and Dutch with input validation
         """
         if not time_ref:
             return None
 
-        time_ref = time_ref.lower().strip()
+        # Sanitize input
+        time_ref = str(time_ref).lower().strip()[:50]  # Limit length
+        
+        # Only allow safe characters
+        if not re.match(r'^[a-z0-9\s]+$', time_ref):
+            logger.warning(f"Invalid characters in time reference: {time_ref}")
+            return None
         
         # Pattern: number + unit (English and Dutch)
-        pattern = r'(\d+)\s*(day|days|dag|dagen|week|weeks|weken|month|months|maand|maanden|year|years|jaar|jaren)'
+        pattern = r'^(\d{1,3})\s*(day|days|dag|dagen|week|weeks|weken|month|months|maand|maanden|year|years|jaar|jaren)$'
         match = re.match(pattern, time_ref)
         
         if not match:
-            raise ValueError(f"Invalid time reference: {time_ref}. Use format like '1 week'/'1 week', '3 days'/'3 dagen', '2 months'/'2 maanden'")
+            logger.warning(f"Invalid time reference format: {time_ref}")
+            return None
         
         number = int(match.group(1))
         unit = match.group(2)
+        
+        # Validate reasonable limits
+        if number > 999:
+            logger.warning(f"Time reference number too large: {number}")
+            return None
         
         now = datetime.now()
         
         # English and Dutch day units
         if unit in ['day', 'days', 'dag', 'dagen']:
+            if number > 365:  # Max 1 year in days
+                number = 365
             return now - timedelta(days=number)
         # English and Dutch week units
         elif unit in ['week', 'weeks', 'weken']:
+            if number > 52:  # Max 1 year in weeks
+                number = 52
             return now - timedelta(weeks=number)
         # English and Dutch month units
         elif unit in ['month', 'months', 'maand', 'maanden']:
+            if number > 12:  # Max 1 year in months
+                number = 12
             return now - timedelta(days=number * 30)  # Approximate
         # English and Dutch year units
         elif unit in ['year', 'years', 'jaar', 'jaren']:
+            if number > 10:  # Max 10 years
+                number = 10
             return now - timedelta(days=number * 365)  # Approximate
         
         return None
@@ -109,8 +168,18 @@ class OdooTextSearch(OdooBase):
             include_descriptions: Whether to search in descriptions
             limit: Maximum number of results to return
         """
+        # Sanitize search term
+        sanitized_term = self._sanitize_search_term(search_term)
+        if not sanitized_term:
+            logger.warning("Empty search term after sanitization")
+            return []
+        
+        # Apply security limits
+        if limit is None or limit > self.max_results_per_query:
+            limit = self.max_results_per_query
+        
         if self.verbose:
-            print(f"🔍 Searching projects for: '{search_term}'")
+            print(f"🔍 Searching projects for: '{sanitized_term[:50]}...'")
         else:
             print(f"🔍 Searching projects...", end="", flush=True)
         
@@ -121,9 +190,9 @@ class OdooTextSearch(OdooBase):
             # Time filter
             date_domain = DomainBuilder.date_filter_domain(since)
             
-            # Text search
+            # Text search with sanitized term
             text_fields = ['name', 'description'] if include_descriptions else ['name']
-            text_domain = DomainBuilder.text_search_domain(search_term, text_fields, include_descriptions)
+            text_domain = DomainBuilder.text_search_domain(sanitized_term, text_fields, include_descriptions)
             
             # Combine domains
             if date_domain:
@@ -135,10 +204,10 @@ class OdooTextSearch(OdooBase):
                 print(f"🔧 Project domain: {final_domain}")
             
             # Apply limit at database level
-            search_kwargs = {}
-            if limit:
-                search_kwargs['limit'] = limit
-                search_kwargs['order'] = 'write_date desc'
+            search_kwargs = {
+                'limit': limit,
+                'order': 'write_date desc'
+            }
             
             projects = self.projects.search_records(final_domain, **search_kwargs)
             

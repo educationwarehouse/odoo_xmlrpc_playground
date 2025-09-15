@@ -14,11 +14,18 @@ import os
 import re
 import base64
 import html
+import secrets
+import hashlib
+import logging
 from pathlib import Path
 from dotenv import load_dotenv
 from openerp_proxy import Client
 from openerp_proxy.ext.all import *
 import warnings
+
+# Configure secure logging
+logging.basicConfig(level=logging.WARNING)
+logger = logging.getLogger(__name__)
 
 # Suppress the pkg_resources deprecation warning from odoo_rpc_client globally
 warnings.filterwarnings("ignore", 
@@ -27,7 +34,7 @@ warnings.filterwarnings("ignore",
 
 
 class ConfigManager:
-    """Centralized configuration management"""
+    """Centralized configuration management with security hardening"""
     
     @staticmethod
     def get_config_path():
@@ -35,39 +42,101 @@ class ConfigManager:
         return Path.home() / ".config/edwh/edwh_odoo_plugin.env"
     
     @staticmethod
+    def _validate_config_security(config_path):
+        """Validate configuration file security"""
+        # Check file permissions (should be 600 - owner read/write only)
+        stat_info = config_path.stat()
+        if stat_info.st_mode & 0o077:  # Check if group/other have any permissions
+            logger.warning(f"Configuration file has insecure permissions: {oct(stat_info.st_mode)}")
+            # Attempt to fix permissions
+            try:
+                config_path.chmod(0o600)
+                logger.info("Fixed configuration file permissions to 600")
+            except Exception as e:
+                logger.error(f"Could not fix file permissions: {e}")
+    
+    @staticmethod
+    def _sanitize_config_value(key, value):
+        """Sanitize configuration values"""
+        if not value:
+            return value
+            
+        # Remove any potential injection characters
+        if key in ['host', 'database', 'user']:
+            # Allow only alphanumeric, dots, hyphens, underscores
+            sanitized = re.sub(r'[^a-zA-Z0-9.\-_@]', '', str(value))
+            if sanitized != value:
+                logger.warning(f"Sanitized config value for {key}")
+            return sanitized
+        elif key == 'protocol':
+            # Only allow known protocols
+            if value not in ['xml-rpc', 'xml-rpcs']:
+                logger.error(f"Invalid protocol: {value}")
+                return 'xml-rpcs'  # Default to secure
+        elif key == 'port':
+            # Validate port range
+            try:
+                port = int(value)
+                if not (1 <= port <= 65535):
+                    logger.error(f"Invalid port: {port}")
+                    return 443  # Default to HTTPS port
+                return port
+            except ValueError:
+                logger.error(f"Invalid port format: {value}")
+                return 443
+        
+        return value
+    
+    @staticmethod
     def load_config(verbose=False):
-        """Load configuration with validation"""
+        """Load configuration with validation and security checks"""
         config_path = ConfigManager.get_config_path()
         
         if not config_path.exists():
-            print(f"❌ No configuration file found!")
-            print(f"   Expected location: {config_path.absolute()}")
-            print(f"")
-            print(f"   Please run: edwh odoo.setup")
+            logger.error("No configuration file found")
+            if verbose:
+                print(f"❌ No configuration file found!")
+                print(f"   Expected location: {config_path.absolute()}")
+                print(f"   Please run: edwh odoo.setup")
             raise FileNotFoundError("No configuration file found. Run 'edwh odoo.setup' to create one.")
+        
+        # Validate file security
+        ConfigManager._validate_config_security(config_path)
         
         load_dotenv(config_path)
         
         if verbose:
             print(f"📁 Loading configuration from: {config_path.absolute()}")
         
-        config = {
+        # Load and sanitize configuration
+        raw_config = {
             'host': os.getenv('ODOO_HOST'),
             'database': os.getenv('ODOO_DATABASE'),
             'user': os.getenv('ODOO_USER'),
             'password': os.getenv('ODOO_PASSWORD'),
-            'port': int(os.getenv('ODOO_PORT', '443')),
+            'port': os.getenv('ODOO_PORT', '443'),
             'protocol': os.getenv('ODOO_PROTOCOL', 'xml-rpcs')
         }
         
+        # Sanitize all values
+        config = {}
+        for key, value in raw_config.items():
+            config[key] = ConfigManager._sanitize_config_value(key, value)
+        
+        # Validate required fields
         missing = [k for k, v in config.items() if not v and k != 'port']
         if missing:
-            print(f"❌ Configuration incomplete!")
-            print(f"   Missing required variables: {', '.join(missing)}")
-            print(f"   Configuration file: {config_path.absolute()}")
-            print(f"")
-            print(f"   Please run: edwh odoo.setup")
+            logger.error(f"Missing required configuration: {missing}")
+            if verbose:
+                print(f"❌ Configuration incomplete!")
+                print(f"   Missing required variables: {', '.join(missing)}")
+                print(f"   Please run: edwh odoo.setup")
             raise ValueError(f"Missing required configuration variables: {', '.join(missing)}. Run 'edwh odoo.setup' to configure.")
+        
+        # Validate host format
+        if config['host'] and not re.match(r'^[a-zA-Z0-9.\-]+$', config['host']):
+            logger.error("Invalid host format")
+            raise ValueError("Invalid host format")
         
         return config
 
@@ -321,12 +390,65 @@ class OdooBase:
         
         return enriched_data
 
-    def download_attachment(self, attachment_id, output_path):
-        """Unified file download method"""
+    def _sanitize_filename(self, filename):
+        """Sanitize filename to prevent path traversal attacks"""
+        if not filename:
+            return "unknown_file"
+        
+        # Remove path separators and dangerous characters
+        sanitized = re.sub(r'[<>:"/\\|?*\x00-\x1f]', '_', filename)
+        sanitized = re.sub(r'\.\.+', '.', sanitized)  # Remove multiple dots
+        sanitized = sanitized.strip('. ')  # Remove leading/trailing dots and spaces
+        
+        # Ensure filename is not empty and not a reserved name
+        reserved_names = ['CON', 'PRN', 'AUX', 'NUL'] + [f'COM{i}' for i in range(1, 10)] + [f'LPT{i}' for i in range(1, 10)]
+        if not sanitized or sanitized.upper() in reserved_names:
+            sanitized = f"file_{secrets.token_hex(4)}"
+        
+        # Limit filename length
+        if len(sanitized) > 255:
+            name, ext = os.path.splitext(sanitized)
+            sanitized = name[:250] + ext
+        
+        return sanitized
+    
+    def _validate_download_path(self, output_path, base_dir=None):
+        """Validate download path to prevent directory traversal"""
+        if base_dir is None:
+            base_dir = Path.cwd() / "downloads"
+        
         try:
+            # Resolve paths to absolute
+            base_path = Path(base_dir).resolve()
+            target_path = Path(output_path).resolve()
+            
+            # Ensure target is within base directory
+            if not str(target_path).startswith(str(base_path)):
+                logger.warning(f"Path traversal attempt blocked: {output_path}")
+                # Create safe path within base directory
+                safe_filename = self._sanitize_filename(os.path.basename(output_path))
+                return base_path / safe_filename
+            
+            return target_path
+            
+        except Exception as e:
+            logger.error(f"Path validation error: {e}")
+            # Fallback to safe path
+            safe_filename = self._sanitize_filename(f"file_{secrets.token_hex(4)}")
+            return Path(base_dir) / safe_filename
+    
+    def download_attachment(self, attachment_id, output_path):
+        """Unified file download method with security hardening"""
+        try:
+            # Validate attachment ID
+            if not isinstance(attachment_id, int) or attachment_id <= 0:
+                logger.error(f"Invalid attachment ID: {attachment_id}")
+                return False
+            
             attachment_records = self.attachments.search_records([('id', '=', attachment_id)])
             
             if not attachment_records:
+                logger.warning(f"File with ID {attachment_id} not found")
                 if self.verbose:
                     print(f"❌ File with ID {attachment_id} not found")
                 return False
@@ -334,9 +456,13 @@ class OdooBase:
             attachment = attachment_records[0]
             file_name = getattr(attachment, 'name', f'file_{attachment_id}')
             
+            # Sanitize filename
+            safe_filename = self._sanitize_filename(file_name)
+            
             if not hasattr(attachment, 'datas'):
+                logger.warning(f"No data field available for file {safe_filename}")
                 if self.verbose:
-                    print(f"❌ No data field available for file {file_name}")
+                    print(f"❌ No data field available for file {safe_filename}")
                 return False
             
             # Get file data
@@ -345,33 +471,64 @@ class OdooBase:
                 file_data_b64 = file_data_b64()
             
             if not file_data_b64:
+                logger.warning(f"No data available for file {safe_filename}")
                 if self.verbose:
-                    print(f"❌ No data available for file {file_name}")
+                    print(f"❌ No data available for file {safe_filename}")
                 return False
             
-            file_data = base64.b64decode(file_data_b64)
+            try:
+                file_data = base64.b64decode(file_data_b64)
+            except Exception as e:
+                logger.error(f"Failed to decode file data: {e}")
+                return False
             
-            # Handle output path
+            # Validate file size (max 100MB)
+            max_size = 100 * 1024 * 1024  # 100MB
+            if len(file_data) > max_size:
+                logger.error(f"File too large: {len(file_data)} bytes (max: {max_size})")
+                if self.verbose:
+                    print(f"❌ File too large: {self.format_file_size(len(file_data))} (max: {self.format_file_size(max_size)})")
+                return False
+            
+            # Validate and secure output path
             if output_path.endswith('/') or os.path.isdir(output_path):
-                output_path = os.path.join(output_path, file_name)
+                output_path = os.path.join(output_path, safe_filename)
             elif not os.path.basename(output_path):
-                output_path = os.path.join(output_path, file_name)
+                output_path = os.path.join(output_path, safe_filename)
             
-            os.makedirs(os.path.dirname(output_path), exist_ok=True)
+            secure_path = self._validate_download_path(output_path)
             
-            with open(output_path, 'wb') as f:
-                f.write(file_data)
+            # Create directory securely
+            try:
+                secure_path.parent.mkdir(parents=True, exist_ok=True, mode=0o755)
+            except Exception as e:
+                logger.error(f"Failed to create directory: {e}")
+                return False
+            
+            # Write file securely
+            try:
+                with open(secure_path, 'wb') as f:
+                    f.write(file_data)
+                
+                # Set secure file permissions
+                secure_path.chmod(0o644)
+                
+            except Exception as e:
+                logger.error(f"Failed to write file: {e}")
+                return False
             
             if self.verbose:
-                print(f"✅ Downloaded: {file_name}")
-                print(f"   To: {output_path}")
+                print(f"✅ Downloaded: {safe_filename}")
+                print(f"   To: {secure_path}")
                 print(f"   Size: {len(file_data)} bytes")
             
+            logger.info(f"File downloaded successfully: {safe_filename}")
             return True
             
         except Exception as e:
+            logger.error(f"Download failed: {e}")
             if self.verbose:
-                print(f"❌ Download failed: {e}")
+                print(f"❌ Download failed: {str(e)[:100]}...")  # Limit error message length
             return False
 
     def html_to_markdown(self, html_content):
