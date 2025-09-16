@@ -22,7 +22,7 @@ from invoke import Context
         'verbose': 'Show detailed search information and debug output'
     }, 
     positional=['search_term'],
-    hookable=True
+    hookable=False
 )
 def search(c: Context, 
           search_term,
