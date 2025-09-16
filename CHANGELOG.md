@@ -2,6 +2,22 @@
 
 <!--next-version-placeholder-->
 
+## v0.3.0 (2025-09-16)
+
+### Feature
+
+* Enhance task hierarchy assembly with caching and improve performance for verbose modes ([`6620dad`](https://github.com/educationwarehouse/odoo_xmlrpc_playground/commit/6620dadd3852d7a6fc19258c87a81c1ac18c6a6d))
+* Improve performance in task manager hierarchy assembly and add timing details; disable verbose logging by default in web search server ([`a9a9522`](https://github.com/educationwarehouse/odoo_xmlrpc_playground/commit/a9a9522ff4377c1c088de6047943fabb72f23144))
+* Add in-memory caching with TTL for user name resolution and verbose timing for task hierarchy operations ([`b18ec30`](https://github.com/educationwarehouse/odoo_xmlrpc_playground/commit/b18ec30f513b4216707c5eea3b24896544111340))
+
+### Fix
+
+* Not hookable setup, no change required on different projects ([`25f0314`](https://github.com/educationwarehouse/odoo_xmlrpc_playground/commit/25f0314eec3814c2dfb1f4519e57e8f6790d22ab))
+* Adjust hierarchy container styling to remove inner scrolling and allow full vertical expansion ([`b0bd408`](https://github.com/educationwarehouse/odoo_xmlrpc_playground/commit/b0bd4085edd289836b74e9a0e4ffe6e1b27b12aa))
+* Import re module to resolve undefined name errors ([`755f654`](https://github.com/educationwarehouse/odoo_xmlrpc_playground/commit/755f654bb061e4f7875a1fa77b85d1c26d176923))
+* Implement comprehensive security hardening for Odoo plugin ([`a304e85`](https://github.com/educationwarehouse/odoo_xmlrpc_playground/commit/a304e85cbd69c0f4431e5cf7501e8d862c6d4883))
+* Update changelog to reflect config settings adjustment for web ([`baf7dee`](https://github.com/educationwarehouse/odoo_xmlrpc_playground/commit/baf7dee557b53abcc2b3dd1d6197c6414884e2f8))
+
 ## v0.2.1 (2025-09-03)
 
 * fixed config settings to use the new location for the web as well. 
